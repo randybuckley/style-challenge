@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -8,110 +9,71 @@ export default function ChallengeStep2Page() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [file, setFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [showOptions, setShowOptions] = useState(false)
-  const searchParams = useSearchParams()
-  const router = useRouter()
+  const [adminDemo, setAdminDemo] = useState(false)
 
-  const isAdminDemo = searchParams?.get('admin_demo') === 'true'
+  const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
-    const getSessionAndUser = async () => {
-      console.log('🌀 Loading Step 2...')
-      const { data: sessionData } = await supabase.auth.getSession()
-      console.log('📦 Session result: ', sessionData)
-      const sessionUser = sessionData.session?.user
+    const isAdminDemo = searchParams.get('admin_demo') === 'true'
+    setAdminDemo(isAdminDemo)
 
+    supabase.auth.getSession().then(async ({ data }) => {
+      const sessionUser = data.session?.user
       if (!sessionUser && !isAdminDemo) {
         router.push('/')
         return
       }
-
-      if (isAdminDemo) {
-        setUser({ id: 'admin', email: 'demo@admin.com', has_paid: true })
-        setLoading(false)
-        return
-      }
-
-      console.log('👤 Session user: ', sessionUser)
-
-      let { data: userRow, error: userError } = await supabase
-        .from('users')
-        .select('has_paid, is_subscriber')
-        .eq('id', sessionUser.id)
-        .single()
-
-      console.log('📄 User row:', userRow)
-      console.log('🐞 User error:', userError)
-
-      if (!userRow && !userError) {
-        const { error: insertError } = await supabase
-          .from('users')
-          .insert([{ id: sessionUser.id, email: sessionUser.email }])
-
-        if (insertError) {
-          console.error('❌ Failed to insert user row:', insertError)
-          setUploadMessage('❌ Could not create user profile.')
-          return
-        }
-
-        const { data: newUserRow } = await supabase
-          .from('users')
-          .select('has_paid, is_subscriber')
-          .eq('id', sessionUser.id)
-          .single()
-
-        userRow = newUserRow
-      }
-
-      if (!userRow) {
-        setUploadMessage('❌ Could not load user access status.')
-        return
-      }
-
-      const canAccess = userRow.has_paid || userRow.is_subscriber
-
-      if (!canAccess) {
-        router.push('/pay')
-        return
-      }
-
-      setUser({ ...sessionUser, ...userRow })
+      setUser(sessionUser)
       setLoading(false)
-    }
-
-    getSessionAndUser()
+    })
   }, [router, searchParams])
+
+  const handleFileChange = (fileObj) => {
+    setFile(fileObj)
+    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
+  }
 
   const handleUpload = async (e) => {
     e.preventDefault()
-    if (!file || !user) {
-      setUploadMessage('Please select a file.')
+    if (!file && !adminDemo) {
+      setUploadMessage('Please select a file first.')
       return
     }
 
-    const filePath = `${user.id}/step2-${Date.now()}-${file.name}`
+    const userId = user?.id || 'demo-user'
+    const filePath = `${userId}/step2-${Date.now()}-${file.name}`
 
-    const { data, error } = await supabase.storage
+    // ✅ Upload to Supabase Storage
+    const { error: storageError } = await supabase.storage
       .from('uploads')
       .upload(filePath, file)
 
-    if (error) {
-      setUploadMessage(`❌ Upload failed: ${error.message}`)
+    if (storageError) {
+      console.error('❌ Storage upload failed:', storageError.message)
+      setUploadMessage(`❌ Upload failed: ${storageError.message}`)
       return
     }
 
-    const { error: dbError } = await supabase
-      .from('uploads')
-      .insert([{ user_id: user.id, step_number: 2, image_url: data.path }])
+    // ✅ Insert into DB using filePath
+    if (!adminDemo) {
+      const { error: dbError } = await supabase
+        .from('uploads')
+        .insert([{ user_id: user.id, step_number: 2, image_url: filePath }])
 
-    if (dbError) {
-      setUploadMessage(`✅ File saved, but failed to write to database: ${dbError.message}`)
-      return
+      if (dbError) {
+        console.error('⚠️ DB insert error:', dbError.message)
+        setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+        return
+      }
     }
 
-    const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${data.path}`
+    // ✅ Build public URL
+    const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
     setImageUrl(fullUrl)
     setUploadMessage('✅ Upload complete!')
     setShowOptions(true)
@@ -119,83 +81,241 @@ export default function ChallengeStep2Page() {
 
   const resetUpload = () => {
     setFile(null)
+    setPreviewUrl('')
     setImageUrl('')
     setUploadMessage('')
     setShowOptions(false)
   }
 
   const proceedToNextStep = () => {
-    router.push('/challenge/step3')
+    router.push('/challenge/step3' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
-  if (loading) return <p>Loading Step 2...</p>
+  if (loading) return <p>Loading challenge step 2...</p>
 
   return (
-    <main style={{ maxWidth: 700, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>Step 2: Style Progression</h1>
-      <p>Watch Patrick’s demo and upload your second image when ready.</p>
-
-      <div style={{ margin: '1rem 0' }}>
-        <iframe
-          src="https://player.vimeo.com/video/76979871"
-          width="100%"
-          height="315"
-          frameBorder="0"
-          allow="fullscreen; picture-in-picture"
-          allowFullScreen
-          title="Tutorial Step 2"
-        ></iframe>
+    <main
+      style={{
+        maxWidth: 700,
+        margin: '0 auto',
+        padding: '2rem',
+        fontFamily: 'sans-serif',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ marginBottom: '1.5rem' }}>
+        <Image
+          src="/logo.jpeg"
+          alt="Style Challenge Logo"
+          width={240}
+          height={0}
+          style={{ height: 'auto', maxWidth: '100%' }}
+          priority
+        />
       </div>
 
-      <div style={{ marginTop: '2rem' }}>
-        <h3>Compare Your Work</h3>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1 }}>
-            <p><strong>Patrick's Reference</strong></p>
+      <h1 style={{ marginBottom: '0.5rem' }}>Step 2: Continue the Style</h1>
+      <hr
+        style={{
+          width: '50%',
+          margin: '0.5rem auto 1rem auto',
+          border: '0.5px solid #666',
+        }}
+      />
+      <p
+        style={{
+          marginBottom: '2rem',
+          fontSize: '1rem',
+          color: '#ddd',
+        }}
+      >
+        Watch Patrick’s demo and upload your second image when ready.
+      </p>
+
+      <div
+        style={{
+          marginBottom: '2rem',
+          width: '100%',
+          aspectRatio: '16 / 9',
+          position: 'relative',
+        }}
+      >
+        <iframe
+          src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            border: '2px solid #555',
+            borderRadius: '6px',
+          }}
+          frameBorder="0"
+          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+          allowFullScreen
+          title="SC Video 2"
+        />
+      </div>
+
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
+        Compare Your Work
+      </h3>
+      <div
+        style={{
+          display: 'flex',
+          gap: '1rem',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          textAlign: 'center',
+          marginBottom: '2rem',
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Patrick's Version</strong></p>
+          <img
+            src="/step2_reference.jpeg"
+            alt="Patrick Version Step 2"
+            style={{
+              width: '100%',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+            }}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Your Version</strong></p>
+          {previewUrl || imageUrl ? (
             <img
-              src="/placeholder_image.jpeg"
-              alt="Reference Step 2"
-              style={{ width: '100%', border: '1px solid #ccc' }}
+              src={previewUrl || imageUrl}
+              alt="Your Version Step 2"
+              style={{
+                width: '100%',
+                border: '1px solid #ccc',
+                borderRadius: '6px',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+              }}
             />
-          </div>
-          <div style={{ flex: 1 }}>
-            <p><strong>Your Upload</strong></p>
-            {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt="Uploaded result"
-                style={{ width: '100%', border: '1px solid #ccc' }}
-              />
-            ) : (
-              <p style={{ fontStyle: 'italic' }}>Upload an image to compare</p>
-            )}
-          </div>
+          ) : (
+            <p>No image selected yet.</p>
+          )}
         </div>
       </div>
 
-      {!showOptions && !isAdminDemo && (
+      {!showOptions && !adminDemo && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
-          <label>
-            Upload your result for Step 2:<br />
+          <label
+            style={{
+              display: 'inline-block',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#000',
+              color: '#fff',
+              borderRadius: '4px',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              textAlign: 'center',
+              marginBottom: '0.75rem',
+            }}
+          >
+            📸 Take Photo / Choose Photo
             <input
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={e => setFile(e.target.files[0])}
-              style={{ marginTop: '0.5rem' }}
+              onChange={(e) => handleFileChange(e.target.files[0])}
+              style={{ display: 'none' }}
             />
           </label>
-          <br />
-          <button type="submit" style={{ marginTop: '1rem' }}>Upload</button>
+
+          <p style={{
+            marginTop: '0.75rem',
+            fontSize: '1rem',
+            color: '#fff',
+            lineHeight: '1.4',
+            textShadow: '0 0 3px rgba(0,0,0,0.5)',
+            marginBottom: '1rem',
+          }}>
+            Your photo preview is shown above.  
+            Compare it with Patrick’s version — does it reflect the shape, balance, and finish for Step 2?  
+            <br/><br/>
+            If this photo represents your <strong>best work</strong>, confirm below to add it to your Style Challenge portfolio 
+            and move to Step 3.
+          </p>
+
+          <button
+            type="submit"
+            style={{
+              marginTop: '0.5rem',
+              padding: '1rem 2rem',
+              backgroundColor: '#28a745',
+              color: '#fff',
+              borderRadius: '6px',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              fontWeight: '600',
+              minWidth: '260px',
+            }}
+          >
+            ✅ Confirm, Add to Portfolio & Move to Step 3
+          </button>
+
           {uploadMessage && <p>{uploadMessage}</p>}
         </form>
       )}
 
-      {(showOptions || isAdminDemo) && (
-        <div style={{ marginTop: '2rem' }}>
-          <p>Are you happy with your result?</p>
-          <button onClick={proceedToNextStep} style={{ marginRight: '1rem' }}>✅ Yes, continue</button>
-          {!isAdminDemo && <button onClick={resetUpload}>🔁 No, upload another</button>}
+      {(showOptions || adminDemo) && (
+        <div
+          style={{
+            marginTop: '3rem',
+            padding: '1.5rem',
+            border: '2px solid #28a745',
+            borderRadius: '8px',
+            background: 'rgba(40, 167, 69, 0.1)',
+            textAlign: 'center',
+          }}
+        >
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+            🎉 Great work!
+          </h2>
+
+          <button
+            onClick={proceedToNextStep}
+            style={{
+              backgroundColor: '#28a745',
+              color: '#fff',
+              padding: '0.75rem 1.5rem',
+              fontSize: '1.1rem',
+              border: 'none',
+              borderRadius: '6px',
+              marginRight: '1rem',
+              cursor: 'pointer',
+              fontWeight: '600',
+              minWidth: '200px',
+            }}
+          >
+            ✅ Yes, This is My Best Work – Continue
+          </button>
+
+          {!adminDemo && (
+            <button
+              onClick={resetUpload}
+              style={{
+                backgroundColor: '#000',
+                color: '#fff',
+                padding: '0.75rem 1.5rem',
+                fontSize: '1.1rem',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                minWidth: '200px',
+              }}
+            >
+              🔁 No, I'll Upload a Better Pic
+            </button>
+          )}
         </div>
       )}
     </main>

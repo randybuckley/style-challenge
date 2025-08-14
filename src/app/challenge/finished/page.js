@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -13,101 +14,90 @@ export default function FinishedLookPage() {
   const [modelUrl, setModelUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [showOptions, setShowOptions] = useState(false)
-  const searchParams = useSearchParams()
+  const [adminDemo, setAdminDemo] = useState(false)
+
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
-    const adminMode = searchParams.get('admin_demo') === 'true'
-    console.log('🌀 Loading finished look page...')
+    const isAdminDemo = searchParams.get('admin_demo') === 'true'
+    setAdminDemo(isAdminDemo)
+
     supabase.auth.getSession().then(async ({ data }) => {
       const sessionUser = data.session?.user
-      console.log('📦 Session result:', data)
-      if (!sessionUser && !adminMode) {
+      if (!sessionUser && !isAdminDemo) {
         router.push('/')
         return
       }
-      if (adminMode) {
-        setUser({ id: 'admin_demo', email: 'admin@example.com', is_admin: true })
-        setLoading(false)
-        return
-      }
-
-      console.log('👤 Session user:', sessionUser)
-      const { data: userRow, error } = await supabase
-        .from('users')
-        .select('has_paid, is_subscriber')
-        .eq('id', sessionUser.id)
-        .single()
-
-      console.log('📄 User row:', userRow)
-      if (error) console.log('🐞 User error:', error)
-
-      if (!userRow || (!userRow.has_paid && !userRow.is_subscriber)) {
-        router.push('/pay')
-        return
-      }
-
-      setUser({ ...sessionUser, ...userRow })
+      setUser(sessionUser)
       setLoading(false)
     })
   }, [router, searchParams])
 
+  const handleMannequinSelect = (file) => {
+    if (file) {
+      setMannequinFile(file)
+      setMannequinUrl(URL.createObjectURL(file))
+    }
+  }
+
+  const handleModelSelect = (file) => {
+    if (file) {
+      setModelFile(file)
+      setModelUrl(URL.createObjectURL(file))
+    }
+  }
+
   const handleUpload = async (e) => {
     e.preventDefault()
-    if (!mannequinFile || !user) {
-      setUploadMessage('Please upload at least a mannequin photo to complete.')
+    if (!mannequinFile && !adminDemo) {
+      setUploadMessage('Please upload a mannequin photo to finish.')
       return
     }
 
-    const uploads = []
+    const userId = user?.id || 'demo-user'
 
-    const mannequinPath = `${user.id}/finished-mannequin-${Date.now()}-${mannequinFile.name}`
-    const { data: mData, error: mError } = await supabase.storage
-      .from('uploads')
-      .upload(mannequinPath, mannequinFile)
+    // ✅ Upload mannequin (required)
+    if (mannequinFile) {
+      const mannequinPath = `${userId}/finished-mannequin-${Date.now()}-${mannequinFile.name}`
 
-    if (mError) {
-      setUploadMessage(`❌ Upload failed: ${mError.message}`)
-      return
+      const { error: manError } = await supabase.storage
+        .from('uploads')
+        .upload(mannequinPath, mannequinFile)
+
+      if (manError) return setUploadMessage(`❌ Mannequin upload failed: ${manError.message}`)
+
+      if (!adminDemo) {
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .insert([{ user_id: user.id, step_number: 4, image_url: mannequinPath }])
+        if (dbError) console.warn('DB insert error:', dbError.message)
+      }
+
+      setMannequinUrl(`https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${mannequinPath}`)
     }
 
-    uploads.push({
-      user_id: user.id,
-      step_number: 4,
-      image_url: mData.path,
-      type: 'mannequin'
-    })
-
-    setMannequinUrl(`https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${mData.path}`)
-
+    // ✅ Upload model (optional)
     if (modelFile) {
-      const modelPath = `${user.id}/finished-model-${Date.now()}-${modelFile.name}`
-      const { data: moData, error: moError } = await supabase.storage
+      const modelPath = `${userId}/finished-model-${Date.now()}-${modelFile.name}`
+
+      const { error: modelError } = await supabase.storage
         .from('uploads')
         .upload(modelPath, modelFile)
 
-      if (!moError) {
-        uploads.push({
-          user_id: user.id,
-          step_number: 4,
-          image_url: moData.path,
-          type: 'model'
-        })
+      if (modelError) return setUploadMessage(`❌ Model upload failed: ${modelError.message}`)
 
-        setModelUrl(`https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${moData.path}`)
+      if (!adminDemo) {
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .insert([{ user_id: user.id, step_number: 4, image_url: modelPath }])
+        if (dbError) console.warn('DB insert error:', dbError.message)
       }
+
+      setModelUrl(`https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${modelPath}`)
     }
 
-    const { error: dbError } = await supabase
-      .from('uploads')
-      .insert(uploads)
-
-    if (dbError) {
-      setUploadMessage(`✅ Files saved, but DB failed: ${dbError.message}`)
-      return
-    }
-
-    setUploadMessage('✅ Upload complete!')
+    setUploadMessage('✅ Finished Look upload complete!')
     setShowOptions(true)
   }
 
@@ -120,89 +110,95 @@ export default function FinishedLookPage() {
     setShowOptions(false)
   }
 
-  const proceedToSubmit = () => {
-    router.push('/challenge/submission/portfolio')
+  const proceedToPortfolio = () => {
+    router.push('/challenge/portfolio' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
-  if (loading) return <p>Loading finished look page...</p>
+  if (loading) return <p>Loading Finished Look...</p>
 
   return (
-    <main style={{ maxWidth: 700, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>Finished Look</h1>
-      <p>This final step completes your style. Upload a mannequin photo (required) and optionally a real-life model photo.</p>
-
-      <div style={{ margin: '1rem 0' }}>
-        <iframe
-          src="https://player.vimeo.com/video/76979871"
-          width="100%"
-          height="315"
-          frameBorder="0"
-          allow="fullscreen; picture-in-picture"
-          allowFullScreen
-          title="Finished Look Tutorial"
-        ></iframe>
+    <main style={{ maxWidth: 700, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif', textAlign: 'center' }}>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <Image src="/logo.jpeg" alt="Style Challenge Logo" width={240} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-        <div style={{ flex: 1 }}>
-          <p><strong>Patrick’s Finished Look</strong></p>
-          <img
-            src="/placeholder_image.jpeg"
-            alt="Patrick's reference"
-            style={{ width: '100%', border: '1px solid #ccc' }}
-          />
-        </div>
+      <h1 style={{ marginBottom: '0.5rem' }}>Finished Look: Show Off Your Best Work</h1>
+      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
+      <p style={{ marginBottom: '2rem', fontSize: '1rem', color: '#ddd', lineHeight: '1.5' }}>
+        This is your final step! Take a moment to capture your <strong>very best work</strong>.  
+        A clear mannequin photo completes the challenge, and an optional in‑real‑life model photo  
+        transforms your style into a portfolio piece to impress clients and followers.
+      </p>
 
-        {mannequinUrl && (
-          <div style={{ flex: 1 }}>
-            <p><strong>Your Mannequin Upload</strong></p>
-            <img
-              src={mannequinUrl}
-              alt="Uploaded mannequin"
-              style={{ width: '100%', border: '1px solid #ccc' }}
-            />
-          </div>
-        )}
+      {/* Compare */}
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>Compare Your Work</h3>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', textAlign: 'center', marginBottom: '2rem' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Patrick's Finished Version</strong></p>
+          <img src="/finished_reference.jpeg" alt="Patrick Finished Reference" style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Your Mannequin Upload</strong></p>
+          {mannequinUrl ? (
+            <img src={mannequinUrl} alt="Mannequin Upload" style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }} />
+          ) : (
+            <p>No mannequin uploaded yet.</p>
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Your Model Upload (Optional)</strong></p>
+          {modelUrl ? (
+            <img src={modelUrl} alt="Model Upload" style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }} />
+          ) : (
+            <p>No model uploaded yet.</p>
+          )}
+        </div>
       </div>
 
       {!showOptions && (
-        <form onSubmit={handleUpload}>
-          <label>
-            Upload mannequin photo (required):<br />
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={e => setMannequinFile(e.target.files[0])}
-              style={{ marginBottom: '1rem' }}
-            />
+        <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
+          <label style={{ display: 'block', padding: '0.75rem 1.5rem', backgroundColor: '#000', color: '#fff', borderRadius: '4px', fontSize: '1rem', cursor: 'pointer', textAlign: 'center', marginBottom: '0.75rem' }}>
+            📸 Take Photo / Choose Photo (Mannequin – Required)
+            <input type="file" accept="image/*" capture="environment" onChange={(e) => handleMannequinSelect(e.target.files[0])} style={{ display: 'none' }} />
           </label>
-          <br />
-          <label>
-            Upload real model photo (optional):<br />
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={e => setModelFile(e.target.files[0])}
-              style={{ marginBottom: '1rem' }}
-            />
+
+          <label style={{ display: 'block', padding: '0.75rem 1.5rem', backgroundColor: '#000', color: '#fff', borderRadius: '4px', fontSize: '1rem', cursor: 'pointer', textAlign: 'center', marginBottom: '1rem' }}>
+            📸 Take Photo / Choose Photo (Optional – In‑Real‑Life Model)
+            <input type="file" accept="image/*" capture="environment" onChange={(e) => handleModelSelect(e.target.files[0])} style={{ display: 'none' }} />
           </label>
-          <br />
-          <button type="submit">Upload</button>
+
+          <p style={{ fontSize: '1rem', color: '#fff', lineHeight: '1.5', marginBottom: '1rem' }}>
+            💡 Make sure this image reflects your <strong>best work</strong> before confirming.  
+            A polished upload will make your portfolio shine!
+          </p>
+
+          <button type="submit" style={{ display: 'block', margin: '0.5rem auto', padding: '1rem 2rem', backgroundColor: '#28a745', color: '#fff', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '1.1rem', fontWeight: '600', minWidth: '260px' }}>
+            ✅ Confirm & Add to Portfolio
+          </button>
+
           {uploadMessage && <p>{uploadMessage}</p>}
         </form>
       )}
 
-      {showOptions && (
-        <div style={{ marginTop: '2rem' }}>
-          <p>You're all done! What would you like to do next?</p>
-          <button onClick={() => router.push('/challenge/submission/portfolio')} style={{ marginRight: '1rem' }}>
-            📁 View in Portfolio
+      {(showOptions || adminDemo) && (
+        <div style={{ marginTop: '3rem', padding: '1.5rem', border: '2px solid #28a745', borderRadius: '8px', background: 'rgba(40, 167, 69, 0.1)', textAlign: 'center' }}>
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+            🎉 Finished Look Complete!
+          </h2>
+          <p style={{ fontSize: '1.1rem', color: '#fff', lineHeight: '1.5', marginBottom: '1rem' }}>
+            Does this final look represent your <strong>best work</strong>?  
+            If yes, share it proudly in your portfolio!
+          </p>
+
+          <button onClick={proceedToPortfolio} style={{ backgroundColor: '#28a745', color: '#fff', padding: '0.75rem 1.5rem', fontSize: '1.1rem', border: 'none', borderRadius: '6px', marginRight: '1rem', cursor: 'pointer', fontWeight: '600', minWidth: '200px' }}>
+            ✅ Yes, Add to Portfolio
           </button>
-          <button onClick={() => router.push('/challenge/submission/competition')}>
-            🏆 Submit to Competition
-          </button>
+
+          {!adminDemo && (
+            <button onClick={resetUpload} style={{ backgroundColor: '#000', color: '#fff', padding: '0.75rem 1.5rem', fontSize: '1.1rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', minWidth: '200px' }}>
+              🔁 No, I'll Upload a Better Pic
+            </button>
+          )}
         </div>
       )}
     </main>

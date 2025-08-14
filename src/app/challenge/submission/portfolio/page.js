@@ -39,17 +39,47 @@ export default function PortfolioPage() {
     getUserAndImages()
   }, [router])
 
+  const toDataURL = (url) =>
+    new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'Anonymous'
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.width
+        canvas.height = img.height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        resolve(canvas.toDataURL('image/jpeg', 0.9))
+      }
+      img.onerror = () => reject(new Error('Could not load image'))
+      img.src = url
+    })
+
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     if (!portfolioRef.current) return
+
+    const imgElements = portfolioRef.current.querySelectorAll('img')
+
+    await Promise.all(
+      Array.from(imgElements).map(async (img) => {
+        const dataUrl = await toDataURL(img.src)
+        img.setAttribute('src', dataUrl)
+      })
+    )
 
     html2pdf()
       .from(portfolioRef.current)
       .set({
         margin: 0.5,
         filename: 'my-portfolio.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2 },
+        image: { type: 'jpeg', quality: 0.9 },
+        html2canvas: {
+          scale: 2,
+          backgroundColor: '#ffffff',
+          allowTaint: true,
+          useCORS: true,
+        },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
       })
       .save()
@@ -58,41 +88,49 @@ export default function PortfolioPage() {
   if (!user) return <p>Loading portfolio...</p>
 
   return (
-    <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: 800, margin: '0 auto' }}>
-      <h1>📸 Your Styling Portfolio</h1>
-      <p>Here’s your full styling journey. You can download a PDF or submit it to Patrick.</p>
+    <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: 800, margin: '0 auto', backgroundColor: '#fff' }}>
+      <h1 style={{ color: '#000' }}>📸 Your Styling Portfolio</h1>
+      <p style={{ color: '#000' }}>
+        Here’s your full styling journey. You can download a PDF or submit it to Patrick.
+      </p>
 
-      <div ref={portfolioRef}>
-        {[1, 2, 3].map(step => (
-          <div key={step} style={{ marginBottom: '1rem' }}>
-            <h3>Step {step}</h3>
-            {images[step] ? (
-              <img
-                src={images[step]}
-                alt={`Step ${step}`}
-                style={{ maxWidth: '100%', border: '1px solid #ccc' }}
-              />
-            ) : (
-              <p>Image not uploaded</p>
-            )}
-          </div>
-        ))}
+      <div ref={portfolioRef} style={{ backgroundColor: '#fff', padding: '1rem', border: '1px solid #ddd', color: '#000' }}>
+        {/* Thumbnails for Steps 1–3 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          {[1, 2, 3].map((step) => (
+            <div key={step} style={{ width: '30%', textAlign: 'center' }}>
+              <h4 style={{ marginBottom: '0.5rem', color: '#000' }}>Step {step}</h4>
+              {images[step] ? (
+                <img
+                  src={images[step]}
+                  alt={`Step ${step}`}
+                  crossOrigin="anonymous"
+                  style={{ width: '100%', height: 'auto', border: '1px solid #ccc' }}
+                />
+              ) : (
+                <p style={{ color: '#000' }}>Image not uploaded</p>
+              )}
+            </div>
+          ))}
+        </div>
 
-        <div style={{ marginBottom: '2rem' }}>
-          <h3>Finished Look</h3>
+        {/* Full-width Finished Look */}
+        <div style={{ marginTop: '1rem' }}>
+          <h3 style={{ color: '#000' }}>Finished Look</h3>
           {images[4] ? (
             <img
               src={images[4]}
               alt="Finished Look"
+              crossOrigin="anonymous"
               style={{ width: '100%', border: '2px solid #333' }}
             />
           ) : (
-            <p>No final image uploaded.</p>
+            <p style={{ color: '#000' }}>No final image uploaded.</p>
           )}
         </div>
       </div>
 
-      <div>
+      <div style={{ marginTop: '2rem' }}>
         <button onClick={downloadPDF} style={{ marginRight: '1rem' }}>
           📄 Download Portfolio
         </button>
