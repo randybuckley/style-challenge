@@ -1,11 +1,13 @@
 'use client'
+/* eslint-disable react/no-unescaped-entities, @next/next/no-img-element */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
+import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function ChallengeStep1Page() {
+function ChallengeStep1Page() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [file, setFile] = useState(null)
@@ -34,11 +36,7 @@ export default function ChallengeStep1Page() {
 
   const handleFileChange = (fileObj) => {
     setFile(fileObj)
-    if (fileObj) {
-      setPreviewUrl(URL.createObjectURL(fileObj))
-    } else {
-      setPreviewUrl('')
-    }
+    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
   }
 
   const handleUpload = async (e) => {
@@ -48,7 +46,7 @@ export default function ChallengeStep1Page() {
       return
     }
 
-    const filePath = `${user.id}/step1-${Date.now()}-${file.name}`
+    const filePath = makeUploadPath(user.id, 'step1', file)
 
     const { data, error } = await supabase.storage
       .from('uploads')
@@ -86,7 +84,7 @@ export default function ChallengeStep1Page() {
     router.push('/challenge/step2' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
-  if (loading) return <p>Loading challenge step 1...</p>
+  if (loading) return <p>Loading challenge step 1…</p>
 
   return (
     <main
@@ -176,7 +174,7 @@ export default function ChallengeStep1Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick's Version</strong></p>
+          <p><strong>Patrick’s Version</strong></p>
           <img
             src="/step1_reference.jpeg"
             alt="Patrick Version Step 1"
@@ -247,7 +245,7 @@ export default function ChallengeStep1Page() {
             Compare it with Patrick’s version — does it capture the shape, balance, and finish?  
             <br/><br/>
             If this photo represents your <strong>best work</strong>, confirm below to add it to your Style Challenge portfolio 
-            and move to Step 2.  
+            and move to Step 2.  
             <br/><br/>
             Not quite right? Take or choose another photo first.
           </p>
@@ -305,7 +303,7 @@ export default function ChallengeStep1Page() {
             }}
           >
             Take a moment to reflect:  
-            Does this image show your <strong>best work</strong> for Step 1?  
+            Does this image show your <strong>best work</strong> for Step 1?  
             If yes, you’re ready to continue your Style Challenge journey!
           </p>
 
@@ -342,11 +340,20 @@ export default function ChallengeStep1Page() {
                 minWidth: '200px',
               }}
             >
-              🔁 No, I'll Upload a Better Pic
+              🔁 No, I’ll Upload a Better Pic
             </button>
           )}
         </div>
       )}
     </main>
+  )
+}
+
+/** Suspense wrapper required for components that call useSearchParams(). */
+export default function Step1Page() {
+  return (
+    <Suspense fallback={<main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>Loading…</main>}>
+      <ChallengeStep1Page />
+    </Suspense>
   )
 }

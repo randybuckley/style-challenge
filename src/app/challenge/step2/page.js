@@ -1,19 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
+import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function ChallengeStep2Page() {
+function ChallengeStep2Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [adminDemo, setAdminDemo] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -22,61 +25,83 @@ export default function ChallengeStep2Page() {
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
     setAdminDemo(isAdminDemo)
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       const sessionUser = data.session?.user
       if (!sessionUser && !isAdminDemo) {
         router.push('/')
         return
       }
-      setUser(sessionUser)
+      setUser(sessionUser || null)
       setLoading(false)
     })
   }, [router, searchParams])
 
   const handleFileChange = (fileObj) => {
-    setFile(fileObj)
+    setFile(fileObj || null)
     setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
   }
 
+  // Revoke previous object URL to avoid leaks
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
+
   const handleUpload = async (e) => {
     e.preventDefault()
-    if (!file && !adminDemo) {
+    if (uploading) return
+
+    // Demo: allow continue without an upload
+    if (adminDemo && !file) {
+      setUploadMessage('✅ Demo mode: skipping upload.')
+      setShowOptions(true)
+      return
+    }
+
+    if (!file) {
       setUploadMessage('Please select a file first.')
       return
     }
 
-    const userId = user?.id || 'demo-user'
-    const filePath = `${userId}/step2-${Date.now()}-${file.name}`
+    try {
+      setUploading(true)
+      setUploadMessage('Uploading…')
 
-    // ✅ Upload to Supabase Storage
-    const { error: storageError } = await supabase.storage
-      .from('uploads')
-      .upload(filePath, file)
+      const userId = user?.id || 'demo-user'
+      const filePath = makeUploadPath(userId, 'step2', file)
 
-    if (storageError) {
-      console.error('❌ Storage upload failed:', storageError.message)
-      setUploadMessage(`❌ Upload failed: ${storageError.message}`)
-      return
-    }
-
-    // ✅ Insert into DB using filePath
-    if (!adminDemo) {
-      const { error: dbError } = await supabase
+      // Upload to Storage
+      const { error: storageError } = await supabase.storage
         .from('uploads')
-        .insert([{ user_id: user.id, step_number: 2, image_url: filePath }])
+        .upload(filePath, file)
 
-      if (dbError) {
-        console.error('⚠️ DB insert error:', dbError.message)
-        setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+      if (storageError) {
+        console.error('❌ Storage upload failed:', storageError.message)
+        setUploadMessage(`❌ Upload failed: ${storageError.message}`)
         return
       }
-    }
 
-    // ✅ Build public URL
-    const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
-    setImageUrl(fullUrl)
-    setUploadMessage('✅ Upload complete!')
-    setShowOptions(true)
+      // Insert row (non-demo only)
+      if (!adminDemo && user) {
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .insert([{ user_id: user.id, step_number: 2, image_url: filePath }])
+
+        if (dbError) {
+          console.error('⚠️ DB insert error:', dbError.message)
+          setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+          return
+        }
+      }
+
+      const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
+      setImageUrl(fullUrl)
+      setUploadMessage('✅ Upload complete!')
+      setShowOptions(true)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const resetUpload = () => {
@@ -91,7 +116,7 @@ export default function ChallengeStep2Page() {
     router.push('/challenge/step3' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
-  if (loading) return <p>Loading challenge step 2...</p>
+  if (loading) return <p>Loading challenge step 2…</p>
 
   return (
     <main
@@ -132,6 +157,7 @@ export default function ChallengeStep2Page() {
         Watch Patrick’s demo and upload your second image when ready.
       </p>
 
+      {/* Correct Vimeo video for Step 2 */}
       <div
         style={{
           marginBottom: '2rem',
@@ -141,7 +167,7 @@ export default function ChallengeStep2Page() {
         }}
       >
         <iframe
-          src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
+          src="https://player.vimeo.com/video/1096804527?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
           style={{
             position: 'absolute',
             top: 0,
@@ -172,7 +198,7 @@ export default function ChallengeStep2Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick's Version</strong></p>
+          <p><strong>Patrick’s Version</strong></p>
           <img
             src="/step2_reference.jpeg"
             alt="Patrick Version Step 2"
@@ -237,31 +263,33 @@ export default function ChallengeStep2Page() {
             marginBottom: '1rem',
           }}>
             Your photo preview is shown above.  
-            Compare it with Patrick’s version — does it reflect the shape, balance, and finish for Step 2?  
+            Compare it with Patrick’s version — does it reflect the shape, balance, and finish for Step&nbsp;2?  
             <br/><br/>
             If this photo represents your <strong>best work</strong>, confirm below to add it to your Style Challenge portfolio 
-            and move to Step 3.
+            and move to Step&nbsp;3.
           </p>
 
           <button
             type="submit"
+            disabled={uploading}
             style={{
               marginTop: '0.5rem',
               padding: '1rem 2rem',
-              backgroundColor: '#28a745',
+              backgroundColor: uploading ? '#1c7e33' : '#28a745',
               color: '#fff',
               borderRadius: '6px',
               border: 'none',
-              cursor: 'pointer',
+              cursor: uploading ? 'not-allowed' : 'pointer',
               fontSize: '1.1rem',
               fontWeight: '600',
               minWidth: '260px',
+              opacity: uploading ? 0.8 : 1,
             }}
           >
-            ✅ Confirm, Add to Portfolio & Move to Step 3
+            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 3'}
           </button>
 
-          {uploadMessage && <p>{uploadMessage}</p>}
+          {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </form>
       )}
 
@@ -313,11 +341,26 @@ export default function ChallengeStep2Page() {
                 minWidth: '200px',
               }}
             >
-              🔁 No, I'll Upload a Better Pic
+              🔁 No, I’ll Upload a Better Pic
             </button>
           )}
         </div>
       )}
     </main>
+  )
+}
+
+// Default export: Suspense wrapper satisfies Next.js CSR bailout requirement
+export default function ChallengeStep2Page() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>
+          Loading…
+        </main>
+      }
+    >
+      <ChallengeStep2Inner />
+    </Suspense>
   )
 }

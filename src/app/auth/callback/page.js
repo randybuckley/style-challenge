@@ -1,60 +1,58 @@
-'use client'
+'use client';
 
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '../../../lib/supabaseClient';
 
-export default function AuthCallbackPage() {
-  const router = useRouter()
-  const [status, setStatus] = useState('Processing your login...')
+function AuthCallbackInner() {
+  const router = useRouter();
+  const sp = useSearchParams();
 
   useEffect(() => {
-    const handleLogin = async () => {
-      // ✅ Parse the hash fragment from the magic link
-      const hashParams = new URLSearchParams(window.location.hash.substring(1))
-      const accessToken = hashParams.get('access_token')
-      const refreshToken = hashParams.get('refresh_token')
+    let isMounted = true;
 
-      if (!accessToken || !refreshToken) {
-        console.error('❌ No tokens found in URL')
-        setStatus('Login failed. Please request a new magic link.')
-        return
+    const go = async () => {
+      const code = sp.get('code');
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) console.warn('[callback] exchangeCodeForSession error:', error.message);
+      } else {
+        try {
+          const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+          const access_token = hash.get('access_token');
+          const refresh_token = hash.get('refresh_token');
+          if (access_token && refresh_token) {
+            const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+            if (error) console.warn('[callback] setSession error:', error.message);
+          }
+        } catch {}
       }
 
-      // ✅ Save session to Supabase
-      const { data, error } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      })
+      const queryNext = sp.get('next');
+      let storedNext = null;
+      try { storedNext = localStorage.getItem('pc_next'); } catch {}
+      const next = queryNext || storedNext || '/challenge/step1';
+      try { localStorage.removeItem('pc_next'); } catch {}
 
-      if (error || !data.session) {
-        console.error('❌ Login failed:', error?.message)
-        setStatus('Login failed. Please request a new magic link.')
-        return
-      }
+      if (!isMounted) return;
+      router.replace(next);
+    };
 
-      console.log('✅ Login successful!', data.session.user)
-      localStorage.setItem('supabaseSession', JSON.stringify({ user: data.session.user }))
-
-      setStatus('Login successful! Redirecting...')
-      setTimeout(() => router.push('/challenge'), 1500)
-    }
-
-    handleLogin()
-  }, [router])
+    go();
+    return () => { isMounted = false; };
+  }, [router, sp]);
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        color: '#fff',
-        background: '#000',
-      }}
-    >
-      <h2>{status}</h2>
+    <main style={{ padding: '2rem', textAlign: 'center', color: '#ccc' }}>
+      Signing you in…
     </main>
-  )
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: '2rem', textAlign: 'center', color: '#ccc' }}>Loading…</main>}>
+      <AuthCallbackInner />
+    </Suspense>
+  );
 }

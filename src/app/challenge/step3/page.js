@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
+import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function ChallengeStep3Page() {
+function ChallengeStep3Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [file, setFile] = useState(null)
@@ -46,21 +47,23 @@ export default function ChallengeStep3Page() {
     }
 
     const userId = user?.id || 'demo-user'
-    const filePath = `${userId}/step3-${Date.now()}-${file.name}`
+    const filePath = makeUploadPath(userId, 'step3', file)
 
-    // ✅ Upload to Storage
-    const { error: storageError } = await supabase.storage
-      .from('uploads')
-      .upload(filePath, file)
+    // Upload to Storage (only if a real file)
+    if (file) {
+      const { error: storageError } = await supabase.storage
+        .from('uploads')
+        .upload(filePath, file)
 
-    if (storageError) {
-      console.error('❌ Storage upload failed:', storageError.message)
-      setUploadMessage(`❌ Upload failed: ${storageError.message}`)
-      return
+      if (storageError) {
+        console.error('❌ Storage upload failed:', storageError.message)
+        setUploadMessage(`❌ Upload failed: ${storageError.message}`)
+        return
+      }
     }
 
-    // ✅ Insert into DB (use filePath)
-    if (!adminDemo) {
+    // Insert into DB unless demo
+    if (!adminDemo && file && user?.id) {
       const { error: dbError } = await supabase
         .from('uploads')
         .insert([{ user_id: user.id, step_number: 3, image_url: filePath }])
@@ -72,8 +75,11 @@ export default function ChallengeStep3Page() {
       }
     }
 
-    const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
-    setImageUrl(fullUrl)
+    if (file) {
+      const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
+      setImageUrl(fullUrl)
+    }
+
     setUploadMessage('✅ Upload complete!')
     setShowOptions(true)
   }
@@ -90,7 +96,7 @@ export default function ChallengeStep3Page() {
     router.push('/challenge/finished' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
-  if (loading) return <p>Loading challenge step 3...</p>
+  if (loading) return <p>Loading challenge step 3…</p>
 
   return (
     <main
@@ -141,14 +147,14 @@ export default function ChallengeStep3Page() {
         }}
       >
         <iframe
-          src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
+          src="https://player.vimeo.com/video/1096804473?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             width: '100%',
             height: '100%',
-            border: '2px solid #555',
+            border: '2px solid #555',   // ✅ fixed quoting
             borderRadius: '6px',
           }}
           frameBorder="0"
@@ -173,7 +179,7 @@ export default function ChallengeStep3Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick's Version</strong></p>
+          <p><strong>Patrick’s Version</strong></p>
           <img
             src="/step3_reference.jpeg"
             alt="Patrick Version Step 3"
@@ -325,11 +331,26 @@ export default function ChallengeStep3Page() {
                 minWidth: '200px',
               }}
             >
-              🔁 No, I'll Upload a Better Pic
+              🔁 No, I’ll Upload a Better Pic
             </button>
           )}
         </div>
       )}
     </main>
+  )
+}
+
+// Default export with Suspense wrapper to satisfy Next’s requirement
+export default function ChallengeStep3Page() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>
+          Loading…
+        </main>
+      }
+    >
+      <ChallengeStep3Inner />
+    </Suspense>
   )
 }
