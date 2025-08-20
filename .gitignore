@@ -42,3 +42,9 @@ next-env.d.ts
 .env.local
 .next
 node_modules
+.env
+.env.local
+.env.*.local
+.next/
+node_modules/
+.DS_Store
