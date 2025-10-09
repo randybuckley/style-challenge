@@ -1,266 +1,212 @@
-'use server'
+// Route handler for certification review email + decision
+// NOTE: Do NOT add 'use server' in this file.
 
 import { supabaseAdmin } from '../../../lib/supabaseAdmin'
 
-export const dynamic = 'force-dynamic'
+// Optional config for Next route handlers
+export const dynamic = 'force-dynamic'      // always dynamic
+export const runtime = 'nodejs'             // Node runtime on Vercel
 
 function getBaseUrl() {
-  // Use an explicit site URL if set; fall back to Vercel URL; else localhost
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL
-  if (explicit) return explicit.replace(/\/+$/, '')
-  const vercel = process.env.VERCEL_URL
-  if (vercel) return `https://${vercel}`.replace(/\/+$/, '')
-  return 'http://localhost:3000'
+  // Prefer an explicit SITE_URL, then NEXT_PUBLIC_SITE_URL, then Vercel URL
+  const envUrl =
+    process.env.SITE_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
+  return envUrl || 'http://localhost:3000'
 }
 
-async function sendWithSendGrid({ to, subject, html, text }) {
-  const key = process.env.SENDGRID_API_KEY
-  const fromEmail = process.env.SENDGRID_FROM
-  if (!key) throw new Error('Missing SENDGRID_API_KEY')
-  if (!fromEmail) throw new Error('Missing SENDGRID_FROM')
+// pick up envs with fallbacks (be lenient with names you’ve set)
+const SENDGRID_KEY = process.env.SENDGRID_API_KEY
+const FROM_EMAIL =
+  process.env.MAIL_FROM_EMAIL || process.env.EMAIL_FROM || 'info@accesslonghair.com'
+const FROM_NAME = process.env.MAIL_FROM_NAME || 'Patrick Cameron'
+const REVIEW_TO =
+  process.env.REVIEW_TO ||
+  process.env.REVIEW_RECIPIENT ||
+  process.env.REVIEW_ADMIN_EMAIL
 
-  const payload = {
-    personalizations: [{ to: [{ email: to }] }],
-    from: { email: fromEmail, name: 'Patrick Cameron' },
-    subject,
-    content: [
-      ...(text ? [{ type: 'text/plain', value: text }] : []),
-      { type: 'text/html', value: html || '<p></p>' }
-    ]
-  }
+async function sendEmail({ to, subject, text, html }) {
+  if (!SENDGRID_KEY) throw new Error('Missing SENDGRID_API_KEY')
+  if (!FROM_EMAIL) throw new Error('Missing MAIL_FROM_EMAIL/EMAIL_FROM')
 
-  const r = await fetch('https://api.sendgrid.com/v3/mail/send', {
+  const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${SENDGRID_KEY}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: FROM_EMAIL, name: FROM_NAME },
+      subject,
+      content: [
+        { type: 'text/plain', value: text || '' },
+        { type: 'text/html', value: html || '' }
+      ]
+    })
   })
-  if (!r.ok) {
-    const body = await r.text().catch(() => '')
-    throw new Error(`SendGrid error ${r.status}: ${body}`)
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`SendGrid error ${res.status}: ${body}`)
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* PUT  -> email reviewer (Patrick) with a one-time review link        */
-/* Body: { token }                                                     */
-/* ------------------------------------------------------------------ */
-export async function PUT(request) {
-  const { token } = await request.json().catch(() => ({}))
-  if (!token) return new Response('Missing token', { status: 400 })
-
-  // Make sure the submission exists
-  const { data, error } = await supabaseAdmin
-    .from('submissions')
-    .select('*')
-    .eq('review_token', token)
-    .single()
-
-  if (error || !data) return new Response('Submission not found', { status: 404 })
-
-  const base = getBaseUrl()
-  const reviewUrl = `${base}/api/review-certification?token=${encodeURIComponent(token)}`
-  const reviewer = process.env.REVIEW_TO || process.env.SENDGRID_FROM
-
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial;">
-      <h2>New Portfolio Submission</h2>
-      <p><strong>${(data.first_name || '')} ${(data.second_name || '')}</strong> — ${data.email || 'no email on file'}</p>
-      <p>Salon: ${data.salon_name || '—'}</p>
-      <p><a href="${reviewUrl}">Open Review Page</a></p>
-      <div style="margin-top:16px;">
-        ${[data.step1_url, data.step2_url, data.step3_url]
-          .filter(Boolean)
-          .map(u => `<img src="${u}" style="width:180px;height:auto;margin-right:8px;border:1px solid #ccc;border-radius:6px" />`)
-          .join('')}
-      </div>
-      <div style="margin-top:12px;">
-        ${data.finished_url ? `<img src="${data.finished_url}" style="width:380px;height:auto;border:1px solid #ccc;border-radius:6px" />` : ''}
-      </div>
-    </div>
-  `
-
-  await sendWithSendGrid({
-    to: reviewer,
-    subject: 'Review needed: Style Challenge submission',
-    html,
-    text: `Review link: ${reviewUrl}`
-  })
-
-  return new Response('ok')
-}
-
-/* ------------------------------------------------------------------ */
-/* GET  -> simple HTML reviewer UI                                    */
-/* /api/review-certification?token=...                                */
-/* ------------------------------------------------------------------ */
-export async function GET(request) {
-  const { searchParams } = new URL(request.url)
-  const token = searchParams.get('token')
-  if (!token) return new Response('Missing token', { status: 400 })
-
-  const { data, error } = await supabaseAdmin
-    .from('submissions')
-    .select('*')
-    .eq('review_token', token)
-    .single()
-
-  if (error || !data) return new Response('Not found', { status: 404 })
-
-  const thumb = (u, label) =>
-    u
-      ? `<div style="margin-right:8px;text-align:center"><div style="font-size:12px;color:#333">${label}</div><img src="${u}" style="width:180px;height:auto;border:1px solid #ccc;border-radius:6px"/></div>`
-      : ''
-
-  const html = `
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<title>Review Submission</title>
-</head>
-<body style="font-family:system-ui,Segoe UI,Arial;background:#f7f7f8;padding:24px;">
-  <div style="max-width:900px;margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:10px;padding:20px;">
-    <h2 style="margin-top:0;">Review Submission</h2>
-    <p><strong>${(data.first_name || '')} ${(data.second_name || '')}</strong> — ${data.email || 'no email on file'}<br/>
-    Salon: ${data.salon_name || '—'}</p>
-
-    <div style="display:flex;flex-wrap:wrap;margin:12px 0;">
-      ${thumb(data.step1_url, 'Step 1')}
-      ${thumb(data.step2_url, 'Step 2')}
-      ${thumb(data.step3_url, 'Step 3')}
-    </div>
-    <div style="margin:12px 0;">
-      <div style="font-size:12px;color:#333;margin-bottom:6px">Finished Look</div>
-      ${data.finished_url ? `<img src="${data.finished_url}" style="width:420px;height:auto;border:1px solid #ccc;border-radius:6px"/>` : '<em>No finished image</em>'}
-    </div>
-
-    <hr style="margin:18px 0;"/>
-
-    <form method="post" style="display:block;">
-      <input type="hidden" name="token" value="${data.review_token}"/>
-
-      <label style="display:block;margin-bottom:8px;">
-        Decision:
-        <select name="decision" style="padding:6px;">
-          <option value="passed">Pass</option>
-          <option value="failed">Fail</option>
-        </select>
-      </label>
-
-      <label style="display:block;margin-bottom:8px;">
-        Reason (for fail):
-        <select name="reason" style="padding:6px;">
-          <option value="">—</option>
-          <option value="finish">Finish not polished</option>
-          <option value="balance">Shape/Balance needs work</option>
-          <option value="gaps">Gaps/sectioning showing</option>
-          <option value="lighting">Lighting/Photo quality</option>
-          <option value="other">Other</option>
-        </select>
-      </label>
-
-      <label style="display:block;margin-bottom:10px;">
-        Notes to student (optional):
-        <br/>
-        <textarea name="notes" rows="4" style="width:100%;padding:8px;"></textarea>
-      </label>
-
-      <button type="submit" style="padding:10px 14px;background:#111;color:#fff;border:0;border-radius:6px;cursor:pointer;">Submit Decision</button>
-    </form>
-  </div>
-</body>
-</html>
-  `.trim()
-
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-}
-
-/* ------------------------------------------------------------------ */
-/* POST -> save decision, email student                               */
-/* Accepts form POST from the reviewer HTML                           */
-/* ------------------------------------------------------------------ */
-export async function POST(request) {
-  // Accept form or JSON
-  let token, decision, reason, notes
+/**
+ * PUT /api/review-certification
+ * Body: { token: string }
+ * Looks up the submission by token and emails the reviewer with links.
+ */
+export async function PUT(req) {
   try {
-    const ct = request.headers.get('content-type') || ''
-    if (ct.includes('application/json')) {
-      const body = await request.json()
-      token = body.token
-      decision = body.decision
-      reason = body.reason || ''
-      notes = body.notes || ''
-    } else {
-      const form = await request.formData()
-      token = form.get('token')
-      decision = form.get('decision')
-      reason = form.get('reason') || ''
-      notes = form.get('notes') || ''
+    const { token } = await req.json()
+    if (!token) {
+      return Response.json({ error: 'Missing token' }, { status: 400 })
     }
-  } catch (_) {}
+    if (!REVIEW_TO) {
+      return Response.json({ error: 'Missing REVIEW_TO/REVIEW_RECIPIENT' }, { status: 500 })
+    }
 
-  if (!token || !decision || !['passed', 'failed'].includes(decision)) {
-    return new Response('Bad request', { status: 400 })
-  }
+    const { data: sub, error } = await supabaseAdmin
+      .from('submissions')
+      .select(
+        'id, user_id, email, first_name, second_name, salon_name, step1_url, step2_url, step3_url, finished_url, status'
+      )
+      .eq('review_token', token)
+      .single()
 
-  // Grab submission
-  const { data, error } = await supabaseAdmin
-    .from('submissions')
-    .select('*')
-    .eq('review_token', token)
-    .single()
+    if (error || !sub) {
+      return Response.json({ error: 'Submission not found' }, { status: 404 })
+    }
 
-  if (error || !data) return new Response('Not found', { status: 404 })
+    const site = getBaseUrl()
+    // (If you later add an internal review UI, point this at that page.)
+    const portfolioLink = `${site}/challenge/portfolio?user=${encodeURIComponent(
+      sub.user_id
+    )}`
+    const approveLink = `${site}/api/review-certification?action=approve&token=${encodeURIComponent(
+      token
+    )}`
+    const rejectLink = `${site}/api/review-certification?action=reject&token=${encodeURIComponent(
+      token
+    )}`
 
-  // Update status
-  const { error: updErr } = await supabaseAdmin
-    .from('submissions')
-    .update({ status: decision })
-    .eq('review_token', token)
-
-  if (updErr) return new Response(`Update failed: ${updErr.message}`, { status: 500 })
-
-  // Email the student
-  const toStudent = data.email
-  if (toStudent) {
-    const base = getBaseUrl()
-    const portfolioUrl = `${base}/challenge/portfolio`
-    const subject =
-      decision === 'passed'
-        ? 'Congratulations — Patrick Cameron Certified!'
-        : 'Style Challenge Review — Next Steps'
-
-    const why = decision === 'failed' && (reason || notes)
-      ? `<p><strong>Feedback:</strong> ${[reason, notes].filter(Boolean).join(' — ')}</p>`
-      : ''
-
-    const badge = decision === 'passed'
-      ? '<p><strong>You’ve earned the Patrick Cameron Certified badge.</strong></p>'
-      : ''
+    const subject = `New certification submission: ${sub.first_name || ''} ${sub.second_name || ''}`.trim()
+    const plain = [
+      `A new submission is ready for review.`,
+      ``,
+      `Name: ${[sub.first_name, sub.second_name].filter(Boolean).join(' ') || '(unknown)'}`,
+      `Email: ${sub.email || '(unknown)'}`,
+      `Salon: ${sub.salon_name || '(n/a)'}`,
+      ``,
+      `Finished Look: ${sub.finished_url || '(none)'}`,
+      `Step1: ${sub.step1_url || '(none)'}`,
+      `Step2: ${sub.step2_url || '(none)'}`,
+      `Step3: ${sub.step3_url || '(none)'}`,
+      ``,
+      `View portfolio: ${portfolioLink}`,
+      `Approve: ${approveLink}`,
+      `Reject: ${rejectLink}`
+    ].join('\n')
 
     const html = `
-      <div style="font-family:system-ui,Segoe UI,Arial;">
-        <p>Hi ${(data.first_name || '')},</p>
-        <p>Your submission has been reviewed.</p>
-        ${badge}
-        ${why}
-        <p>You can view and download your updated portfolio here:</p>
-        <p><a href="${portfolioUrl}">${portfolioUrl}</a></p>
-        <p>— Patrick & Team</p>
-      </div>
+      <h3>New certification submission</h3>
+      <p><strong>${[sub.first_name, sub.second_name].filter(Boolean).join(' ') || '(unknown)'}</strong>${
+      sub.salon_name ? ` — ${sub.salon_name}` : ''
+    }<br/>${sub.email || ''}</p>
+      <ul>
+        <li>Finished: ${sub.finished_url ? `<a href="${sub.finished_url}">image</a>` : '(none)'}</li>
+        <li>Step 1: ${sub.step1_url ? `<a href="${sub.step1_url}">image</a>` : '(none)'}</li>
+        <li>Step 2: ${sub.step2_url ? `<a href="${sub.step2_url}">image</a>` : '(none)'}</li>
+        <li>Step 3: ${sub.step3_url ? `<a href="${sub.step3_url}">image</a>` : '(none)'}</li>
+      </ul>
+      <p>
+        <a href="${portfolioLink}">View portfolio</a> ·
+        <a href="${approveLink}">Approve</a> ·
+        <a href="${rejectLink}">Reject</a>
+      </p>
     `
-    await sendWithSendGrid({ to: toStudent, subject, html, text: `${subject}\n${portfolioUrl}` })
-  }
 
-  // Simple reviewer confirmation page
-  const html = `
-    <!doctype html><html><body style="font-family:system-ui;padding:24px;">
-      <h3>Saved</h3>
-      <p>Status set to <strong>${decision}</strong> and the student has been emailed.</p>
-    </body></html>
-  `
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    await sendEmail({ to: REVIEW_TO, subject, text: plain, html })
+    return Response.json({ ok: true })
+  } catch (e) {
+    return Response.json({ error: e.message || 'Server error' }, { status: 500 })
+  }
+}
+
+/**
+ * POST /api/review-certification
+ * Body: { token: string, decision: 'approve'|'reject', reason?: string, comments?: string }
+ * Updates the submission and emails the candidate.
+ */
+export async function POST(req) {
+  try {
+    const { token, decision, reason, comments } = await req.json()
+    if (!token || !decision) {
+      return Response.json({ error: 'Missing token or decision' }, { status: 400 })
+    }
+    if (!['approve', 'reject'].includes(decision)) {
+      return Response.json({ error: 'Invalid decision' }, { status: 400 })
+    }
+
+    const { data: sub, error } = await supabaseAdmin
+      .from('submissions')
+      .select('id, email, first_name, second_name')
+      .eq('review_token', token)
+      .single()
+
+    if (error || !sub) {
+      return Response.json({ error: 'Submission not found' }, { status: 404 })
+    }
+
+    const newStatus = decision === 'approve' ? 'approved' : 'rejected'
+    await supabaseAdmin
+      .from('submissions')
+      .update({ status: newStatus, reviewed_at: new Date().toISOString(), reason, comments })
+      .eq('id', sub.id)
+
+    // notify candidate
+    if (sub.email) {
+      const subject =
+        decision === 'approve'
+          ? 'Congratulations — You are Patrick Cameron Certified!'
+          : 'Certification Review — Please Try Again'
+
+      const site = getBaseUrl()
+      const portfolio = `${site}/challenge/portfolio`
+
+      const text =
+        decision === 'approve'
+          ? `Congratulations! Your submission has been approved.\n\nYou can download your enhanced PDF from your portfolio:\n${portfolio}`
+          : `Thanks for submitting. After review, we’d like you to try again.\n${
+              reason ? `Reason: ${reason}\n` : ''
+            }${comments ? `Comments: ${comments}\n` : ''}\nVisit your portfolio: ${portfolio}`
+
+      const html =
+        decision === 'approve'
+          ? `<p>Congratulations! Your submission has been <strong>approved</strong>.</p><p>You can download your enhanced PDF from your <a href="${portfolio}">portfolio</a>.</p>`
+          : `<p>Thanks for submitting. After review, we’d like you to <strong>try again</strong>.</p>
+             ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+             ${comments ? `<p><strong>Comments:</strong> ${comments}</p>` : ''}
+             <p>Visit your <a href="${portfolio}">portfolio</a>.</p>`
+
+      await sendEmail({ to: sub.email, subject, text, html })
+    }
+
+    return Response.json({ ok: true })
+  } catch (e) {
+    return Response.json({ error: e.message || 'Server error' }, { status: 500 })
+  }
+}
+
+/**
+ * Optional minimal GET to make it clearer if someone opens the URL in a browser.
+ * (Your UI should call PUT/POST; GET is just a friendly message.)
+ */
+export async function GET() {
+  return Response.json(
+    { ok: true, message: 'Use PUT to notify reviewer or POST to record a decision.' },
+    { status: 200 }
+  )
 }
