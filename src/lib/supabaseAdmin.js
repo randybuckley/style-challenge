@@ -1,5 +1,4 @@
-'use server'
-
+cat > src/lib/supabaseAdmin.js <<'EOF'
 import { createClient } from '@supabase/supabase-js'
 
 export const supabaseAdmin = createClient(
@@ -9,3 +8,4 @@ export const supabaseAdmin = createClient(
     auth: { persistSession: false, autoRefreshToken: false }
   }
 )
+EOF
