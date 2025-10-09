@@ -16,19 +16,27 @@ function getBaseUrl() {
   return envUrl || 'http://localhost:3000'
 }
 
-// pick up envs with fallbacks (be lenient with names you’ve set)
+// ── ENV VARS (with your Vercel names as first choice) ──────────────────────────
 const SENDGRID_KEY = process.env.SENDGRID_API_KEY
+
 const FROM_EMAIL =
-  process.env.MAIL_FROM_EMAIL || process.env.EMAIL_FROM || 'info@accesslonghair.com'
-const FROM_NAME = process.env.MAIL_FROM_NAME || 'Patrick Cameron'
+  process.env.SENDER_EMAIL ||            // ✅ your Vercel var
+  process.env.MAIL_FROM_EMAIL ||
+  process.env.EMAIL_FROM ||
+  'info@accesslonghair.com'
+
+const FROM_NAME =
+  process.env.MAIL_FROM_NAME || 'Patrick Cameron'
+
 const REVIEW_TO =
+  process.env.REVIEWER_EMAIL ||          // ✅ your Vercel var
   process.env.REVIEW_TO ||
   process.env.REVIEW_RECIPIENT ||
   process.env.REVIEW_ADMIN_EMAIL
 
 async function sendEmail({ to, subject, text, html }) {
   if (!SENDGRID_KEY) throw new Error('Missing SENDGRID_API_KEY')
-  if (!FROM_EMAIL) throw new Error('Missing MAIL_FROM_EMAIL/EMAIL_FROM')
+  if (!FROM_EMAIL) throw new Error('Missing sender email (SENDER_EMAIL/MAIL_FROM_EMAIL/EMAIL_FROM)')
 
   const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
@@ -65,7 +73,7 @@ export async function PUT(req) {
       return Response.json({ error: 'Missing token' }, { status: 400 })
     }
     if (!REVIEW_TO) {
-      return Response.json({ error: 'Missing REVIEW_TO/REVIEW_RECIPIENT' }, { status: 500 })
+      return Response.json({ error: 'Missing reviewer email (REVIEWER_EMAIL/REVIEW_TO)' }, { status: 500 })
     }
 
     const { data: sub, error } = await supabaseAdmin
@@ -82,17 +90,11 @@ export async function PUT(req) {
 
     const site = getBaseUrl()
     // (If you later add an internal review UI, point this at that page.)
-    const portfolioLink = `${site}/challenge/portfolio?user=${encodeURIComponent(
-      sub.user_id
-    )}`
-    const approveLink = `${site}/api/review-certification?action=approve&token=${encodeURIComponent(
-      token
-    )}`
-    const rejectLink = `${site}/api/review-certification?action=reject&token=${encodeURIComponent(
-      token
-    )}`
+    const portfolioLink = `${site}/challenge/portfolio?user=${encodeURIComponent(sub.user_id)}`
+    const approveLink = `${site}/api/review-certification?action=approve&token=${encodeURIComponent(token)}`
+    const rejectLink = `${site}/api/review-certification?action=reject&token=${encodeURIComponent(token)}`
 
-    const subject = `New certification submission: ${sub.first_name || ''} ${sub.second_name || ''}`.trim()
+    const subject = `New certification submission: ${[sub.first_name, sub.second_name].filter(Boolean).join(' ')}`.trim()
     const plain = [
       `A new submission is ready for review.`,
       ``,
@@ -201,8 +203,7 @@ export async function POST(req) {
 }
 
 /**
- * Optional minimal GET to make it clearer if someone opens the URL in a browser.
- * (Your UI should call PUT/POST; GET is just a friendly message.)
+ * Minimal GET so opening the route in a browser shows something useful.
  */
 export async function GET() {
   return Response.json(
