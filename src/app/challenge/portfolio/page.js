@@ -1,203 +1,433 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import jsPDF from 'jspdf'
-import exifr from 'exifr'
-import { supabase } from '../../../lib/supabaseClient' // keep this path
+import { supabase } from '../../../lib/supabaseClient'
 
 export default function PortfolioPage() {
-  const router = useRouter()
-
   const [user, setUser] = useState(null)
-  const [latestByStep, setLatestByStep] = useState({}) // {1:url,2:url,3:url,4:url}
-  const [loading, setLoading] = useState(true)
-
+  const [images, setImages] = useState({})
   const [firstName, setFirstName] = useState('')
   const [secondName, setSecondName] = useState('')
   const [salonName, setSalonName] = useState('')
   const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState(0)
-  const [skipNextAutosave, setSkipNextAutosave] = useState(true) // avoids autosave right after load
-  const [pdfBusy, setPdfBusy] = useState(false) // 👈 prevent double-clicks while generating
+  const [loading, setLoading] = useState(true)
 
-  const frameRef = useRef(null)
-  const STORAGE_PREFIX =
-    'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+  const router = useRouter()
+  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
+  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
 
-  // Load session, uploads (latest per step), and profile
   useEffect(() => {
-    let cancelled = false
     const run = async () => {
-      try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const sessionUser = sessionData?.session?.user
-        if (!sessionUser) {
-          router.push('/')
-          return
-        }
-        if (cancelled) return
-        setUser(sessionUser)
-
-        // newest first → keep first per step
-        const { data: uploads, error: upErr } = await supabase
-          .from('uploads')
-          .select('step_number, image_url, created_at')
-          .eq('user_id', sessionUser.id)
-          .in('step_number', [1, 2, 3, 4])
-          .order('created_at', { ascending: false })
-
-        if (upErr) console.warn('[uploads] error:', upErr.message)
-
-        const latest = {}
-        for (const row of uploads || []) {
-          if (!row?.image_url) continue
-          const step = row.step_number
-          if (!latest[step]) {
-            latest[step] = row.image_url.startsWith('http')
-              ? row.image_url
-              : STORAGE_PREFIX + row.image_url
-          }
-        }
-        if (!cancelled) setLatestByStep(latest)
-
-        // ensure profile row + load fields
-        const { error: upsertErr } = await supabase
-          .from('profiles')
-          .upsert(
-            { id: sessionUser.id, email: sessionUser.email ?? null },
-            { onConflict: 'id' }
-          )
-        if (upsertErr) console.warn('[profiles.upsert] error:', upsertErr.message)
-
-        const { data: profile, error: profErr } = await supabase
-          .from('profiles')
-          .select('first_name, second_name, salon_name')
-          .eq('id', sessionUser.id)
-          .single()
-
-        if (profErr) {
-          console.warn('[profiles.select] error:', profErr.message)
-        } else if (profile && !cancelled) {
-          setFirstName(profile.first_name || '')
-          setSecondName(profile.second_name || '')
-          setSalonName(profile.salon_name || '')
-          setSkipNextAutosave(true) // skip the initial autosave triggered by these sets
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+      const { data: sessionData } = await supabase.auth.getSession()
+      const sessionUser = sessionData?.session?.user
+      if (!sessionUser) {
+        router.push('/')
+        return
       }
+      setUser(sessionUser)
+
+      // profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('first_name, second_name, salon_name')
+        .eq('id', sessionUser.id)
+        .single()
+
+      if (profile) {
+        setFirstName(profile.first_name || '')
+        setSecondName(profile.second_name || '')
+        setSalonName(profile.salon_name || '')
+      }
+
+      // latest uploads (1,2,3,4)
+      const STORAGE_PREFIX =
+        'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+      const { data: rows } = await supabase
+        .from('uploads')
+        .select('step_number, image_url, created_at')
+        .eq('user_id', sessionUser.id)
+        .in('step_number', [1, 2, 3, 4])
+        .order('created_at', { ascending: false })
+
+      const latest = {}
+      for (const r of rows || []) {
+        if (!latest[r.step_number]) {
+          latest[r.step_number] = r.image_url?.startsWith('http')
+            ? r.image_url
+            : STORAGE_PREFIX + r.image_url
+        }
+      }
+      setImages(latest)
+      setLoading(false)
     }
     run()
-    return () => {
-      cancelled = true
-    }
   }, [router])
 
-  // Debounced autosave (skips the first run after loading the profile)
-  useEffect(() => {
+  const saveProfile = async () => {
     if (!user) return
-    if (skipNextAutosave) {
-      setSkipNextAutosave(false)
-      return
-    }
     setSaving(true)
-    const t = setTimeout(async () => {
-      try {
-        const { error } = await supabase.from('profiles').upsert({
-          id: user.id,
-          email: user.email ?? null,
-          first_name: (firstName || '').trim() || null,
-          second_name: (secondName || '').trim() || null,
-          salon_name: (salonName || '').trim() || null
-        })
-        if (error) {
-          console.warn('[profiles.autosave] error:', error.message)
-        } else {
-          setSavedAt(Date.now())
-        }
-      } finally {
-        setSaving(false)
-      }
-    }, 600)
-    return () => clearTimeout(t)
-  }, [firstName, secondName, salonName, user, skipNextAutosave])
-
-  // ✅ FIXED SYNTAX HERE
-  const displayName = useMemo(
-    () => `${firstName || ''} ${secondName || ''}`.trim(),
-    [firstName, secondName]
-  )
-
-  // -------- PDF helpers (EXIF-aware) --------
-  const blobToDataURL = (blob) =>
-    new Promise((resolve) => {
-      const r = new FileReader()
-      r.onloadend = () => resolve(r.result)
-      r.readAsDataURL(blob)
-    })
-
-  const urlToDataURL = async (url) => {
     try {
-      const res = await fetch(url, { mode: 'cors' })
-      const blob = await res.blob()
-      return await blobToDataURL(blob)
-    } catch (e) {
-      console.warn('[urlToDataURL] fallback for', url, e)
-      return 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        email: user.email ?? null,
+        first_name: (firstName || '').trim() || null,
+        second_name: (secondName || '').trim() || null,
+        salon_name: (salonName || '').trim() || null
+      })
+    } finally {
+      setSaving(false)
     }
   }
 
-  const loadImage = (src) =>
+  // embed an image for crisp PDF
+  const toDataURL = (url) =>
     new Promise((resolve, reject) => {
       const img = new Image()
       img.crossOrigin = 'anonymous'
-      img.onload = () => resolve(img)
-      img.onerror = (err) => reject(err)
-      img.src = src
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        resolve(canvas.toDataURL('image/jpeg', 0.95))
+      }
+      img.onerror = () => reject(new Error('Could not load image'))
+      img.src = url
     })
 
-  const drawOriented = (ctx, img, orientation, targetW, targetH) => {
-    const c = ctx.canvas
-    const swap = () => {
-      const tmp = c.width
-      c.width = c.height
-      c.height = tmp
-    }
-    c.width = targetW
-    c.height = targetH
+  const downloadPDF = async () => {
+    const html2pdf = (await import('html2pdf.js')).default
+    const root = portfolioRef.current
+    if (!root) return
 
-    switch (orientation) {
-      case 2: ctx.translate(c.width, 0); ctx.scale(-1, 1); break
-      case 3: ctx.translate(c.width, c.height); ctx.rotate(Math.PI); break
-      case 4: ctx.translate(0, c.height); ctx.scale(1, -1); break
-      case 5: swap(); ctx.rotate(0.5 * Math.PI); ctx.scale(1, -1); break
-      case 6: swap(); ctx.rotate(0.5 * Math.PI); ctx.translate(0, -c.width); break
-      case 7: swap(); ctx.rotate(-0.5 * Math.PI); ctx.scale(1, -1); ctx.translate(-c.height, 0); break
-      case 8: swap(); ctx.rotate(-0.5 * Math.PI); ctx.translate(-c.height, 0); break
-      default: break
+    // constants for US Letter at ~96dpi
+    const PDF_WIDTH = 816   // 8.5in * 96
+    const PDF_HEIGHT = 1056 // 11in * 96
+
+    // snapshot current styles
+    const prevRootStyle = root.getAttribute('style') || ''
+    const hatch = hatchRef.current
+    const prevHatchStyle = hatch?.getAttribute('style') || ''
+
+    // lock layout so cross-hatch reaches the very edges (remove bottom grey band)
+    root.style.width = `${PDF_WIDTH}px`
+    root.style.margin = '0 auto'
+    if (hatch) {
+      hatch.style.borderRadius = '0px'
+      // push hatch to page edges; move “space” to parchment below
+      hatch.style.paddingTop = '18px'
+      hatch.style.paddingLeft = '18px'
+      hatch.style.paddingRight = '18px'
+      hatch.style.paddingBottom = '0px' // <- virtually no grey at the bottom
+      hatch.style.minHeight = `${PDF_HEIGHT}px`
+      hatch.style.boxShadow = 'none'
     }
 
-    const arImg = img.width / img.height
-    const arBox = (orientation >= 5 && orientation <= 8)
-      ? c.height / c.width
-      : c.width / c.height
+    // temporarily add extra parchment bottom padding so more parchment shows
+    const parchmentEl = root.querySelector('[data-parchment="1"]')
+    const prevParchPad = parchmentEl?.style.paddingBottom || ''
+    if (parchmentEl) parchmentEl.style.paddingBottom = '56px' // show MORE parchment
 
-    let sx = 0, sy = 0, sw = img.width, sh = img.height
-    if (arImg > arBox) {
-      const newW = sh * arBox
-      sx = (sw - newW) / 2
-      sw = newW
-    } else {
-      const newH = sw / arBox
-      sy = (sh - newH) / 2
-      sh = newH
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height)
+    // embed images marked for PDF
+    const imgs = root.querySelectorAll('img[data-embed="true"]')
+    const originals = []
+    await Promise.all(
+      Array.from(imgs).map(async (img) => {
+        originals.push([img, img.src])
+        try {
+          const dataUrl = await toDataURL(img.src)
+          img.setAttribute('src', dataUrl)
+        } catch {}
+      })
+    )
+
+    await html2pdf()
+      .from(root)
+      .set({
+        margin: 0,
+        filename: 'style-challenge-portfolio.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+      })
+      .save()
+
+    // restore DOM
+    originals.forEach(([img, src]) => img.setAttribute('src', src))
+    if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
+    root.setAttribute('style', prevRootStyle)
+    if (hatch) hatch.setAttribute('style', prevHatchStyle)
   }
 
-  // --- (rest of your PDF + render code unchanged) ---
-  // everything from "const orientedDataURL" down to the end of StepCard remains identical
-  // ✅ no other syntax errors
+  if (loading) {
+    return (
+      <main style={pageShell}>
+        <p style={{ color: '#ccc' }}>Loading…</p>
+      </main>
+    )
+  }
 
+  const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
+
+  return (
+    <main style={pageShell}>
+      {/* Editable identity bar (outside certificate) */}
+      <div style={editBar}>
+        <input
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="First Name"
+          style={field}
+        />
+        <input
+          value={secondName}
+          onChange={(e) => setSecondName(e.target.value)}
+          placeholder="Last Name"
+          style={field}
+        />
+        <input
+          value={salonName}
+          onChange={(e) => setSalonName(e.target.value)}
+          placeholder="Salon"
+          style={{ ...field, minWidth: 220 }}
+        />
+        <button onClick={saveProfile} disabled={saving} style={btnSmall}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      {/* Certificate container captured to PDF */}
+      <div ref={portfolioRef} style={container}>
+        {/* CROSS-HATCH edge-to-edge margin */}
+        <div ref={hatchRef} style={hatchWrap}>
+          {/* Double-ruled “sheet” */}
+          <div style={sheet}>
+            {/* PARCHMENT center */}
+            <div style={parchment} data-parchment="1">
+              {/* translucent rounded logo */}
+              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
+                <img
+                  src="/logo.jpeg"
+                  alt="Patrick Cameron — Style Challenge"
+                  data-embed="true"
+                  style={{
+                    width: 220,
+                    height: 'auto',
+                    display: 'inline-block',
+                    opacity: 0.6,
+                    borderRadius: 16
+                  }}
+                />
+              </div>
+
+              {/* Prominent black name (no "Your Portfolio") */}
+              <h2 style={stylistName}>
+                {nameLine}
+                {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
+              </h2>
+
+              {/* Steps 1–3 (equal sizes, translucent plates like the logo) */}
+              <div style={stepsGrid}>
+                {[1, 2, 3].map((n) => (
+                  <div key={n} style={thumbCard}>
+                    <div style={thumbLabel}>Step {n}</div>
+                    {images[n] ? (
+                      <img
+                        src={images[n]}
+                        alt={`Step ${n}`}
+                        data-embed="true"
+                        style={thumbImg}
+                      />
+                    ) : (
+                      <div style={missing}>No image</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Finished Look */}
+              <div style={finishedWrap}>
+                <div style={finishedLabel}>Finished Look — Challenge Number One</div>
+                <div style={finishedCard}>
+                  {images[4] ? (
+                    <img
+                      src={images[4]}
+                      alt="Finished Look"
+                      data-embed="true"
+                      style={finishedImg}
+                    />
+                  ) : (
+                    <div style={missing}>No final image</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* /parchment */}
+          </div>
+          {/* /sheet */}
+        </div>
+        {/* /hatch */}
+      </div>
+
+      {/* Actions */}
+      <div style={{ marginTop: 18, textAlign: 'center' }}>
+        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
+          📄 Download Portfolio
+        </button>
+        <button
+          onClick={() => router.push('/challenge/submission/competition')}
+          style={{ ...btn, background: '#28a745' }}
+        >
+          ✅ Become Certified
+        </button>
+      </div>
+    </main>
+  )
+}
+
+/* ===================== styles ===================== */
+
+const pageShell = {
+  minHeight: '100vh',
+  background: '#000',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  padding: '20px 12px',
+  boxSizing: 'border-box',
+  fontFamily:
+    'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+}
+
+const container = {
+  width: 'min(800px, 95vw)'
+}
+
+/* Cross-hatch “margin” layer */
+const hatchWrap = {
+  padding: 22, // export temporarily sets bottom to 0px
+  borderRadius: 14,
+  boxShadow: '0 18px 48px rgba(0,0,0,.35)',
+  backgroundImage:
+    'repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, rgba(0,0,0,0) 2px 7px),' +
+    'repeating-linear-gradient(0deg, rgba(0,0,0,.045) 0 2px, rgba(0,0,0,0) 2px 7px)',
+  backgroundColor: '#eae7df'
+}
+
+/* double-ruled sheet */
+const sheet = {
+  background: '#f2ebda',
+  borderRadius: 12,
+  boxShadow:
+    'inset 0 0 0 2px #cbbfa3, inset 0 0 0 10px #f2ebda, inset 0 0 0 12px #cbbfa3'
+}
+
+/* center parchment */
+const parchment = {
+  background: 'url(/parchment.jpg) repeat, #f3ecdc',
+  borderRadius: 10,
+  padding: '16px 16px 36px', // baseline extra bottom padding
+  color: '#111'
+}
+
+/* big, prominent black name */
+const stylistName = {
+  textAlign: 'center',
+  fontSize: 32,
+  fontWeight: 900,
+  color: '#000',
+  margin: '2px 0 14px'
+}
+
+const stepsGrid = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, 1fr)',
+  gap: 22,
+  marginTop: 6
+}
+
+/* translucent plates like the logo */
+const thumbCard = {
+  background: 'rgba(255,255,255,0.60)',
+  border: '1px solid rgba(255,255,255,0.82)',
+  borderRadius: 16,
+  padding: 12,
+  boxShadow: '0 6px 18px rgba(0,0,0,.12)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  minHeight: 260
+}
+
+const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBottom: 8 }
+
+const thumbImg = {
+  width: '100%',
+  aspectRatio: '1 / 1',
+  objectFit: 'contain',
+  borderRadius: 12,
+  background: '#fff',
+  border: '1px solid #eee',
+  display: 'block',
+  opacity: 0.92   // slightly opaque
+}
+
+const finishedWrap = { marginTop: 16 }
+const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
+const finishedCard = {
+  background: '#fff',
+  border: '1px solid #e6e6e6',
+  borderRadius: 16,
+  boxShadow: '0 8px 22px rgba(0,0,0,.08)',
+  padding: 12
+}
+const finishedImg = {
+  width: '100%',
+  maxHeight: 680,
+  objectFit: 'contain',
+  borderRadius: 12,
+  background: '#fff',
+  display: 'block',
+  opacity: 0.92   // slightly opaque
+}
+
+const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
+
+const btn = {
+  background: '#0b5ed7',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 10,
+  padding: '12px 16px',
+  fontWeight: 700,
+  cursor: 'pointer',
+  boxShadow: '0 10px 22px rgba(0,0,0,.25)'
+}
+const btnSmall = {
+  background: '#444',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  padding: '10px 12px',
+  fontWeight: 700,
+  cursor: 'pointer'
+}
+const editBar = {
+  width: 'min(800px, 95vw)',
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+  justifyContent: 'center',
+  alignItems: 'center',
+  marginBottom: 10
+}
+const field = {
+  background: '#161616',
+  color: '#fff',
+  border: '1px solid #333',
+  borderRadius: 8,
+  padding: '10px 12px',
+  minWidth: 160
 }
