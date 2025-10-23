@@ -12,18 +12,10 @@ export default function PortfolioPage() {
   const [salonName, setSalonName] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
 
   const router = useRouter()
-  const portfolioRef = useRef()
-  const hatchRef = useRef()
-
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 640)
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
+  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
 
   useEffect(() => {
     const run = async () => {
@@ -88,150 +80,125 @@ export default function PortfolioPage() {
     }
   }
 
-  // embed an image for crisp PDF
-  const toDataURL = (url) =>
-    new Promise((resolve, reject) => {
-      const img = new Image()
-      img.crossOrigin = 'anonymous'
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0)
-        resolve(canvas.toDataURL('image/jpeg', 0.95))
-      }
-      img.onerror = () => reject(new Error('Could not load image'))
-      img.src = url
-    })
-
+  // ------- NEW: marginless “cover”-scaled PDF with fallback ------- //
   const downloadPDF = async () => {
+    const root = portfolioRef.current
+    if (!root) return
+
+    // px for US Letter at ~96dpi
+    const PDF_PX_W = 816   // 8.5in * 96
+    const PDF_PX_H = 1056  // 11in * 96
+
+    // snapshot styles we touch
+    const hatch = hatchRef.current
+    const prevRootStyle = root.getAttribute('style') || ''
+    const prevHatchStyle = hatch?.getAttribute('style') || ''
+
+    // lock layout so cross-hatch goes to the edges
+    root.style.width = `${PDF_PX_W}px`
+    root.style.margin = '0 auto'
+    if (hatch) {
+      hatch.style.borderRadius = '0px'
+      hatch.style.padding = '16px'
+      hatch.style.paddingBottom = '8px' // lighten bottom grey band
+      hatch.style.minHeight = `${PDF_PX_H}px`
+      hatch.style.boxShadow = 'none'
+    }
+
+    // show a bit more parchment at the bottom for balance
+    const parchmentEl = root.querySelector('[data-parchment="1"]')
+    const prevParchPad = parchmentEl?.style.paddingBottom || ''
+    if (parchmentEl) parchmentEl.style.paddingBottom = '44px'
+
+    // embed remote images (crisper canvas & offline-safe)
+    const toDataURL = (url) =>
+      new Promise((resolve, reject) => {
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        img.onload = () => {
+          const c = document.createElement('canvas')
+          c.width = img.naturalWidth
+          c.height = img.naturalHeight
+          c.getContext('2d').drawImage(img, 0, 0)
+          resolve(c.toDataURL('image/jpeg', 0.95))
+        }
+        img.onerror = () => reject(new Error('Could not load image'))
+        img.src = url
+      })
+
+    const imgs = root.querySelectorAll('img[data-embed="true"]')
+    const originals = []
+    await Promise.all(
+      Array.from(imgs).map(async (img) => {
+        originals.push([img, img.src])
+        try {
+          const dataUrl = await toDataURL(img.src)
+          img.setAttribute('src', dataUrl)
+        } catch {}
+      })
+    )
+
+    // Try cover-scaling path (html2canvas + jsPDF). If not available, fall back.
+    let usedCoverPath = false
     try {
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
         import('html2canvas'),
-        import('jspdf'),
+        import('jspdf')
       ])
 
-      const root = portfolioRef.current
-      if (!root) return
-
-      // US Letter in CSS px at ~96dpi
-      const PDF_PX_W = 816
-      const PDF_PX_H = 1056
-
-      // Snapshot styles we’ll temporarily override
-      const hatch = hatchRef.current
-      const prev = {
-        root: root.getAttribute('style') || '',
-        hatch: hatch?.getAttribute('style') || '',
-      }
-
-      // Lock layout so cross-hatch hits page edges, no side gaps
-      root.style.width = `${PDF_PX_W}px`
-      root.style.margin = '0 auto'
-      if (hatch) {
-        hatch.style.borderRadius = '0px'
-        hatch.style.padding = '16px'       // slightly tighter than before
-        hatch.style.paddingBottom = '8px'  // minimize grey at bottom
-        hatch.style.minHeight = `${PDF_PX_H}px`
-        hatch.style.boxShadow = 'none'
-      }
-
-      // More parchment bottom, but keep total height in check for width-fit
-      const parchmentEl = root.querySelector('[data-parchment="1"]')
-      const prevParchPad = parchmentEl?.style.paddingBottom || ''
-      if (parchmentEl) parchmentEl.style.paddingBottom = '44px'
-
-      // ---------- TEMP PDF-ONLY LAYOUT OVERRIDES ----------
-      // Force Steps into 3 columns small at top, big Finished below
-      const stepsGridEl = root.querySelector('[data-role="steps-grid"]')
-      const thumbCards = root.querySelectorAll('[data-role="thumb-card"]')
-      const finishedImgEl = root.querySelector('[data-role="finished-img"]')
-
-      const prevStepsStyle = stepsGridEl?.getAttribute('style') || ''
-      if (stepsGridEl) {
-        stepsGridEl.style.display = 'grid'
-        stepsGridEl.style.gridTemplateColumns = 'repeat(3, 1fr)'
-        stepsGridEl.style.gap = '14px'
-        stepsGridEl.style.marginTop = '6px'
-      }
-      const prevThumbs = []
-      thumbCards.forEach((el) => {
-        prevThumbs.push([el, el.getAttribute('style') || ''])
-        el.style.minHeight = '200px'
-        el.style.padding = '10px'
-      })
-      const prevFinishedStyle = finishedImgEl?.getAttribute('style') || ''
-      if (finishedImgEl) {
-        // slightly smaller to keep overall height within 1 page on width-fit
-        finishedImgEl.style.maxHeight = '600px'
-        finishedImgEl.style.objectFit = 'contain'
-        finishedImgEl.style.width = '100%'
-      }
-      // ---------- /TEMP OVERRIDES ----------
-
-      // Embed any remote images so CORS can’t blank the canvas
-      const imgs = root.querySelectorAll('img[data-embed="true"]')
-      const originals = []
-      await Promise.all(
-        Array.from(imgs).map(async (img) => {
-          originals.push([img, img.src])
-          try {
-            const dataUrl = await toDataURL(img.src)
-            img.setAttribute('src', dataUrl)
-          } catch {}
-        })
-      )
-
-      // Capture to canvas
       const canvas = await html2canvas(root, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         windowWidth: PDF_PX_W,
-        windowHeight: Math.max(PDF_PX_H, root.scrollHeight),
+        windowHeight: Math.max(PDF_PX_H, root.scrollHeight)
       })
 
-      // Build single-page PDF with **no left/right margin**:
       const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' })
-      const pageW = doc.internal.pageSize.getWidth()
-      const pageH = doc.internal.pageSize.getHeight()
+      const pageW = doc.internal.pageSize.getWidth()   // 612
+      const pageH = doc.internal.pageSize.getHeight()  // 792
 
-      const pxToPt = 0.75 // 96 -> 72 dpi
-      const imgWpt = canvas.width * pxToPt
-      const imgHpt = canvas.height * pxToPt
+      const pxToPt = 0.75
+      const imgW = canvas.width * pxToPt
+      const imgH = canvas.height * pxToPt
 
-      // Fill width first (no side margins). If too tall, fall back to "fit page".
-      let scaleW = pageW / imgWpt
-      let scaledH = imgHpt * scaleW
-      let useScale = scaleW
-      if (scaledH > pageH) {
-        // fallback: fit-to-page to avoid cropping (adds small margins if needed)
-        const scaleFit = Math.min(pageW / imgWpt, pageH / imgHpt)
-        useScale = scaleFit
-        scaledH = imgHpt * useScale
-      }
-
-      const drawW = imgWpt * useScale
-      const drawH = scaledH
-      const x = (drawW === pageW) ? 0 : (pageW - drawW) / 2   // 0 if width-fit
-      const y = (pageH - drawH) / 2                            // center vertically
+      // COVER scale → no margins (crop overflow)
+      const scale = Math.max(pageW / imgW, pageH / imgH)
+      const drawW = imgW * scale
+      const drawH = imgH * scale
+      const x = (pageW - drawW) / 2
+      const y = (pageH - drawH) / 2
 
       doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, drawW, drawH)
       doc.save('style-challenge-portfolio.pdf')
+      usedCoverPath = true
+    } catch {
+      // Fallback: previous html2pdf.js flow (keeps current behavior if libs missing)
+      const html2pdf = (await import('html2pdf.js')).default
+      await html2pdf()
+        .from(root)
+        .set({
+          margin: 0,
+          filename: 'style-challenge-portfolio.pdf',
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+        })
+        .save()
+    }
 
-      // Restore DOM
-      originals.forEach(([img, src]) => img.setAttribute('src', src))
-      if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
-      root.setAttribute('style', prev.root)
-      if (hatch) hatch.setAttribute('style', prev.hatch)
-      if (stepsGridEl) stepsGridEl.setAttribute('style', prevStepsStyle)
-      thumbCards.forEach((el, i) => el.setAttribute('style', prevThumbs[i][1]))
-      if (finishedImgEl) finishedImgEl.setAttribute('style', prevFinishedStyle)
-    } catch (e) {
-      alert('PDF render failed. Please try again.')
+    // restore DOM
+    originals.forEach(([img, src]) => img.setAttribute('src', src))
+    if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
+    root.setAttribute('style', prevRootStyle)
+    if (hatch) hatch.setAttribute('style', prevHatchStyle)
+
+    if (!usedCoverPath) {
+      // Optional: let you know libs weren’t present (so margins may persist)
+      console.warn('Cover-scaling PDF fallback used (html2canvas/jsPDF not available).')
     }
   }
+  // --------------------------------------------------------------- //
 
   if (loading) {
     return (
@@ -242,10 +209,6 @@ export default function PortfolioPage() {
   }
 
   const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
-  const stepsGridStyle = {
-    ...stepsGrid,
-    gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
-  }
 
   return (
     <main style={pageShell}>
@@ -298,16 +261,16 @@ export default function PortfolioPage() {
                 />
               </div>
 
-              {/* Prominent black name */}
+              {/* Prominent black name (no "Your Portfolio") */}
               <h2 style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps 1–3 (responsive; PDF forces 3-up via downloadPDF) */}
-              <div data-role="steps-grid" style={stepsGridStyle}>
+              {/* Steps 1–3 (equal sizes, translucent plates like the logo) */}
+              <div style={stepsGrid}>
                 {[1, 2, 3].map((n) => (
-                  <div key={n} data-role="thumb-card" style={thumbCard}>
+                  <div key={n} style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n] ? (
                       <img
@@ -332,7 +295,6 @@ export default function PortfolioPage() {
                       src={images[4]}
                       alt="Finished Look"
                       data-embed="true"
-                      data-role="finished-img"
                       style={finishedImg}
                     />
                   ) : (
@@ -378,11 +340,13 @@ const pageShell = {
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
 }
 
-const container = { width: 'min(800px, 95vw)' }
+const container = {
+  width: 'min(800px, 95vw)'
+}
 
 /* Cross-hatch “margin” layer */
 const hatchWrap = {
-  padding: 22, // export temporarily sets bottom to 8px
+  padding: 22, // export temporarily tweaks this
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -403,7 +367,7 @@ const sheet = {
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px', // baseline; lifted to 44px in PDF to show more parchment
+  padding: '16px 16px 36px', // baseline extra bottom padding
   color: '#111'
 }
 
@@ -416,9 +380,9 @@ const stylistName = {
   margin: '2px 0 14px'
 }
 
-/* steps grid: columns set at runtime for mobile/desktop */
 const stepsGrid = {
   display: 'grid',
+  gridTemplateColumns: 'repeat(3, 1fr)',
   gap: 22,
   marginTop: 6
 }
@@ -446,7 +410,7 @@ const thumbImg = {
   background: '#fff',
   border: '1px solid #eee',
   display: 'block',
-  opacity: 0.92
+  opacity: 0.92   // slightly opaque
 }
 
 const finishedWrap = { marginTop: 16 }
@@ -465,7 +429,7 @@ const finishedImg = {
   borderRadius: 12,
   background: '#fff',
   display: 'block',
-  opacity: 0.92
+  opacity: 0.92   // slightly opaque
 }
 
 const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
