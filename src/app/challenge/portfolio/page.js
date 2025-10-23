@@ -12,11 +12,10 @@ export default function PortfolioPage() {
   const [salonName, setSalonName] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
 
   const router = useRouter()
-  const portfolioRef = useRef(null) // kept (not used by PDF now, but harmless)
-  const hatchRef = useRef(null)     // kept for parity
+  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
+  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
 
   useEffect(() => {
     const run = async () => {
@@ -65,15 +64,6 @@ export default function PortfolioPage() {
     run()
   }, [router])
 
-  // simple responsive switch for Steps grid
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)')
-    const apply = () => setIsMobile(!!mq.matches)
-    apply()
-    mq.addEventListener?.('change', apply)
-    return () => mq.removeEventListener?.('change', apply)
-  }, [])
-
   const saveProfile = async () => {
     if (!user) return
     setSaving(true)
@@ -90,251 +80,105 @@ export default function PortfolioPage() {
     }
   }
 
-  // ---------- PDF helpers (off-screen one-page layout) ----------
-  const toDataURL = async (url) => {
-    if (!url) return null
-    try {
+  // embed an image for crisp PDF
+  const toDataURL = (url) =>
+    new Promise((resolve, reject) => {
       const img = new Image()
       img.crossOrigin = 'anonymous'
-      await new Promise((res, rej) => {
-        img.onload = res
-        img.onerror = rej
-        img.src = url
-      })
-      const c = document.createElement('canvas')
-      c.width = img.naturalWidth
-      c.height = img.naturalHeight
-      const ctx = c.getContext('2d')
-      ctx.drawImage(img, 0, 0)
-      return c.toDataURL('image/jpeg', 0.95)
-    } catch {
-      return url // fallback
-    }
-  }
-
-  function buildPdfDom({ nameLine, salonName, urls }) {
-    // Letter page at ~96dpi
-    const W = 816
-    const H = 1056
-
-    // tuned constants to keep within one page
-    const OUTER_PAD = 18
-    const PARCH_PAD = 16
-    const THUMB_SIZE = 170
-    const THUMB_GAP = 14
-    const FINISHED_H = 460
-    const NAME_FS = 28
-
-    // Outer hatch
-    const hatch = document.createElement('div')
-    Object.assign(hatch.style, {
-      position: 'fixed',
-      left: '-10000px', // off-screen so it doesn't flash
-      top: '0',
-      width: `${W}px`,
-      height: `${H}px`,
-      boxSizing: 'border-box',
-      padding: `${OUTER_PAD}px`,
-      backgroundImage:
-        'repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, rgba(0,0,0,0) 2px 7px),' +
-        'repeating-linear-gradient(0deg, rgba(0,0,0,.045) 0 2px, rgba(0,0,0,0) 2px 7px)',
-      backgroundColor: '#eae7df',
-      borderRadius: '0',
-    })
-
-    // sheet
-    const sheet = document.createElement('div')
-    Object.assign(sheet.style, {
-      width: '100%',
-      height: '100%',
-      boxSizing: 'border-box',
-      background: '#f2ebda',
-      borderRadius: '12px',
-      boxShadow:
-        'inset 0 0 0 2px #cbbfa3, inset 0 0 0 10px #f2ebda, inset 0 0 0 12px #cbbfa3',
-      overflow: 'hidden',
-    })
-    hatch.appendChild(sheet)
-
-    // parchment
-    const parchment = document.createElement('div')
-    Object.assign(parchment.style, {
-      width: '100%',
-      height: '100%',
-      boxSizing: 'border-box',
-      padding: `${PARCH_PAD}px`,
-      background: 'url(/parchment.jpg) repeat, #f3ecdc',
-      borderRadius: '10px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '10px'
-    })
-    sheet.appendChild(parchment)
-
-    // logo
-    const logoWrap = document.createElement('div')
-    Object.assign(logoWrap.style, { textAlign: 'center', marginTop: '2px', marginBottom: '0' })
-    const logo = document.createElement('img')
-    logo.src = '/logo.jpeg'
-    logo.setAttribute('data-embed', 'true')
-    Object.assign(logo.style, {
-      width: '200px',
-      height: 'auto',
-      opacity: '0.6',
-      borderRadius: '16px',
-    })
-    logoWrap.appendChild(logo)
-    parchment.appendChild(logoWrap)
-
-    // prominent name
-    const nameLineEl = document.createElement('div')
-    nameLineEl.textContent = salonName ? `${nameLine} — ${salonName}` : nameLine
-    Object.assign(nameLineEl.style, {
-      textAlign: 'center',
-      fontSize: `${NAME_FS}px`,
-      fontWeight: '900',
-      color: '#000',
-      margin: '2px 0 8px'
-    })
-    parchment.appendChild(nameLineEl)
-
-    // steps row
-    const stepsRow = document.createElement('div')
-    Object.assign(stepsRow.style, {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: `${THUMB_GAP}px`,
-      alignItems: 'start'
-    })
-    parchment.appendChild(stepsRow)
-
-    ;[1, 2, 3].forEach((n) => {
-      const card = document.createElement('div')
-      Object.assign(card.style, {
-        background: 'rgba(255,255,255,0.60)',
-        border: '1px solid rgba(255,255,255,0.82)',
-        borderRadius: '16px',
-        padding: '10px',
-        boxShadow: '0 6px 18px rgba(0,0,0,.12)',
-        minHeight: `${THUMB_SIZE + 44}px`,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-      })
-      const label = document.createElement('div')
-      label.textContent = `Step ${n}`
-      Object.assign(label.style, {
-        fontWeight: '700',
-        fontSize: '14px',
-        color: '#5b5b5b',
-        marginBottom: '6px'
-      })
-      card.appendChild(label)
-
-      if (urls[n]) {
-        const img = document.createElement('img')
-        img.src = urls[n]
-        img.setAttribute('data-embed', 'true')
-        Object.assign(img.style, {
-          width: '100%',
-          maxWidth: `${THUMB_SIZE}px`,
-          height: `${THUMB_SIZE}px`,
-          objectFit: 'contain',
-          borderRadius: '12px',
-          background: '#fff',
-          border: '1px solid #eee',
-          opacity: '0.92',
-          display: 'block'
-        })
-        card.appendChild(img)
-      } else {
-        const miss = document.createElement('div')
-        miss.textContent = 'No image'
-        Object.assign(miss.style, { color: '#888', fontStyle: 'italic', marginTop: '18px' })
-        card.appendChild(miss)
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        resolve(canvas.toDataURL('image/jpeg', 0.95))
       }
-
-      stepsRow.appendChild(card)
+      img.onerror = () => reject(new Error('Could not load image'))
+      img.src = url
     })
 
-    // finished look
-    const finWrap = document.createElement('div')
-    Object.assign(finWrap.style, { marginTop: '10px' })
-    const finLabel = document.createElement('div')
-    finLabel.textContent = 'Finished Look — Challenge Number One'
-    Object.assign(finLabel.style, { textAlign: 'center', fontWeight: 700, marginBottom: '8px' })
-    finWrap.appendChild(finLabel)
+  // Robust single-page PDF: render from a live, invisible clone at US Letter size.
+  const downloadPDF = async () => {
+    const mod = await import('html2pdf.js')
+    const html2pdf = mod.default || mod
 
-    const finCard = document.createElement('div')
-    Object.assign(finCard.style, {
-      background: '#fff',
-      border: '1px solid #e6e6e6',
-      borderRadius: '16px',
-      boxShadow: '0 8px 22px rgba(0,0,0,.08)',
-      padding: '12px',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: `${FINISHED_H}px`
+    const src = portfolioRef.current
+    if (!src) return
+
+    // US Letter at CSS px (~96dpi)
+    const PDF_W = 816   // 8.5in * 96
+    const PDF_H = 1056  // 11in * 96
+
+    // build a live, invisible clone so it has real layout
+    const clone = src.cloneNode(true)
+    Object.assign(clone.style, {
+      width: `${PDF_W}px`,
+      height: `${PDF_H}px`,
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      zIndex: '-1',
+      opacity: '0',        // invisible but laid out
+      pointerEvents: 'none',
+      margin: '0'
     })
 
-    if (urls[4]) {
-      const fin = document.createElement('img')
-      fin.src = urls[4]
-      fin.setAttribute('data-embed', 'true')
-      Object.assign(fin.style, {
-        width: '100%',
-        maxHeight: `${FINISHED_H}px`,
-        objectFit: 'contain',
-        borderRadius: '12px',
-        background: '#fff',
-        display: 'block',
-        opacity: '0.92'
-      })
-      finCard.appendChild(fin)
-    } else {
-      const miss = document.createElement('div')
-      miss.textContent = 'No final image'
-      Object.assign(miss.style, { color: '#888', fontStyle: 'italic' })
-      finCard.appendChild(miss)
+    // tighten cross-hatch bottom to avoid a heavy grey band
+    const hatchClone = clone.querySelector('[data-hatch="1"]')
+    if (hatchClone) {
+      hatchClone.style.borderRadius = '0'
+      hatchClone.style.minHeight = `${PDF_H}px`
+      hatchClone.style.boxShadow = 'none'
+      hatchClone.style.padding = '18px 18px 0 18px'
     }
 
-    finWrap.appendChild(finCard)
-    parchment.appendChild(finWrap)
+    // show a bit more parchment inside for the bottom edge
+    const parchmentClone = clone.querySelector('[data-parchment="1"]')
+    const prevParchPad = parchmentClone?.style.paddingBottom || ''
+    if (parchmentClone) {
+      parchmentClone.style.paddingBottom = '56px'
+    }
 
-    return hatch
-  }
-
-  const downloadPDF = async () => {
-    const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
-    const urls = { 1: images[1], 2: images[2], 3: images[3], 4: images[4] }
-    const pdfRoot = buildPdfDom({ nameLine, salonName, urls })
-    document.body.appendChild(pdfRoot)
-
-    // embed imgs
-    const imgs = Array.from(pdfRoot.querySelectorAll('img[data-embed="true"]'))
-    const originals = []
+    // embed images marked for export
+    const imgs = clone.querySelectorAll('img[data-embed="true"]')
     await Promise.all(
-      imgs.map(async (img) => {
-        originals.push([img, img.src])
-        const dataUrl = await toDataURL(img.src)
-        if (dataUrl) img.src = dataUrl
+      Array.from(imgs).map(async (img) => {
+        try {
+          const dataUrl = await toDataURL(img.src)
+          img.removeAttribute('crossorigin')
+          img.src = dataUrl
+        } catch {
+          // keep going if one image fails
+        }
       })
     )
 
-    const html2pdf = (await import('html2pdf.js')).default
-    await html2pdf()
-      .from(pdfRoot)
-      .set({
-        margin: 0,
-        filename: 'style-challenge-portfolio.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-      })
-      .save()
+    // attach clone so html2canvas can measure it
+    document.body.appendChild(clone)
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
 
-    pdfRoot.remove()
+    try {
+      await html2pdf()
+        .from(clone)
+        .set({
+          margin: 0,
+          filename: 'style-challenge-portfolio.pdf',
+          image: { type: 'jpeg', quality: 0.95 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            windowWidth: PDF_W,
+            windowHeight: PDF_H
+          },
+          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+        })
+        .save()
+    } finally {
+      if (parchmentClone) parchmentClone.style.paddingBottom = prevParchPad
+      clone.remove()
+    }
   }
 
   if (loading) {
@@ -374,10 +218,10 @@ export default function PortfolioPage() {
         </button>
       </div>
 
-      {/* Certificate container (on-screen layout remains) */}
+      {/* Certificate container captured to PDF */}
       <div ref={portfolioRef} style={container}>
         {/* CROSS-HATCH edge-to-edge margin */}
-        <div ref={hatchRef} style={hatchWrap}>
+        <div ref={hatchRef} style={hatchWrap} data-hatch="1">
           {/* Double-ruled “sheet” */}
           <div style={sheet}>
             {/* PARCHMENT center */}
@@ -398,14 +242,14 @@ export default function PortfolioPage() {
                 />
               </div>
 
-              {/* Prominent black name */}
+              {/* Prominent black name (no "Your Portfolio") */}
               <h2 style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps 1–3 (equal sizes; stacks on mobile) */}
-              <div style={getStepsGrid(isMobile)}>
+              {/* Steps 1–3 */}
+              <div style={stepsGrid}>
                 {[1, 2, 3].map((n) => (
                   <div key={n} style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
@@ -483,7 +327,7 @@ const container = {
 
 /* Cross-hatch “margin” layer */
 const hatchWrap = {
-  padding: 22,
+  padding: 22, // export temporarily sets bottom to 0px
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -504,7 +348,7 @@ const sheet = {
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px',
+  padding: '16px 16px 36px', // baseline extra bottom padding
   color: '#111'
 }
 
@@ -517,15 +361,13 @@ const stylistName = {
   margin: '2px 0 14px'
 }
 
-// responsive steps grid
-const getStepsGrid = (isMobile) => ({
+const stepsGrid = {
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
+  gridTemplateColumns: 'repeat(3, 1fr)',
   gap: 22,
   marginTop: 6
-})
+}
 
-/* translucent plates like the logo */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
