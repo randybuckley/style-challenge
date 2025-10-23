@@ -14,8 +14,8 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
 
   const router = useRouter()
-  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
-  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
+  const portfolioRef = useRef()
+  const hatchRef = useRef()
 
   useEffect(() => {
     const run = async () => {
@@ -27,7 +27,6 @@ export default function PortfolioPage() {
       }
       setUser(sessionUser)
 
-      // profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, second_name, salon_name')
@@ -40,7 +39,6 @@ export default function PortfolioPage() {
         setSalonName(profile.salon_name || '')
       }
 
-      // latest uploads (1,2,3,4)
       const STORAGE_PREFIX =
         'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
       const { data: rows } = await supabase
@@ -80,7 +78,6 @@ export default function PortfolioPage() {
     }
   }
 
-  // embed an image for crisp PDF
   const toDataURL = (url) =>
     new Promise((resolve, reject) => {
       const img = new Image()
@@ -102,35 +99,29 @@ export default function PortfolioPage() {
     const root = portfolioRef.current
     if (!root) return
 
-    // constants for US Letter at ~96dpi
-    const PDF_WIDTH = 816   // 8.5in * 96
-    const PDF_HEIGHT = 1056 // 11in * 96
+    const PDF_WIDTH = 816
+    const PDF_HEIGHT = 1056
 
-    // snapshot current styles
     const prevRootStyle = root.getAttribute('style') || ''
     const hatch = hatchRef.current
     const prevHatchStyle = hatch?.getAttribute('style') || ''
 
-    // lock layout so cross-hatch reaches the very edges (remove bottom grey band)
     root.style.width = `${PDF_WIDTH}px`
     root.style.margin = '0 auto'
     if (hatch) {
       hatch.style.borderRadius = '0px'
-      // push hatch to page edges; move “space” to parchment below
       hatch.style.paddingTop = '18px'
       hatch.style.paddingLeft = '18px'
       hatch.style.paddingRight = '18px'
-      hatch.style.paddingBottom = '0px' // <- virtually no grey at the bottom
+      hatch.style.paddingBottom = '0px'
       hatch.style.minHeight = `${PDF_HEIGHT}px`
       hatch.style.boxShadow = 'none'
     }
 
-    // temporarily add extra parchment bottom padding so more parchment shows
     const parchmentEl = root.querySelector('[data-parchment="1"]')
     const prevParchPad = parchmentEl?.style.paddingBottom || ''
-    if (parchmentEl) parchmentEl.style.paddingBottom = '56px' // show MORE parchment
+    if (parchmentEl) parchmentEl.style.paddingBottom = '56px'
 
-    // embed images marked for PDF
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
@@ -154,7 +145,6 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore DOM
     originals.forEach(([img, src]) => img.setAttribute('src', src))
     if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
     root.setAttribute('style', prevRootStyle)
@@ -173,73 +163,40 @@ export default function PortfolioPage() {
 
   return (
     <main style={pageShell}>
-      {/* Editable identity bar (outside certificate) */}
       <div style={editBar}>
-        <input
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          placeholder="First Name"
-          style={field}
-        />
-        <input
-          value={secondName}
-          onChange={(e) => setSecondName(e.target.value)}
-          placeholder="Last Name"
-          style={field}
-        />
-        <input
-          value={salonName}
-          onChange={(e) => setSalonName(e.target.value)}
-          placeholder="Salon"
-          style={{ ...field, minWidth: 220 }}
-        />
+        <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First Name" style={field} />
+        <input value={secondName} onChange={(e) => setSecondName(e.target.value)} placeholder="Last Name" style={field} />
+        <input value={salonName} onChange={(e) => setSalonName(e.target.value)} placeholder="Salon" style={{ ...field, minWidth: 220 }} />
         <button onClick={saveProfile} disabled={saving} style={btnSmall}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       </div>
 
-      {/* Certificate container captured to PDF */}
       <div ref={portfolioRef} style={container}>
-        {/* CROSS-HATCH edge-to-edge margin */}
         <div ref={hatchRef} style={hatchWrap}>
-          {/* Double-ruled “sheet” */}
           <div style={sheet}>
-            {/* PARCHMENT center */}
             <div style={parchment} data-parchment="1">
-              {/* translucent rounded logo */}
               <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
                 <img
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
-                  style={{
-                    width: 220,
-                    height: 'auto',
-                    display: 'inline-block',
-                    opacity: 0.6,
-                    borderRadius: 16
-                  }}
+                  style={{ width: 220, height: 'auto', display: 'inline-block', opacity: 0.6, borderRadius: 16 }}
                 />
               </div>
 
-              {/* Prominent black name (no "Your Portfolio") */}
               <h2 style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps 1–3 (equal sizes, translucent plates like the logo) */}
-              <div style={stepsGrid}>
+              {/* steps 1–3 */}
+              <div className="stepsGrid" style={stepsGrid}>
                 {[1, 2, 3].map((n) => (
-                  <div key={n} style={thumbCard}>
+                  <div key={n} className="thumbCard" style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n] ? (
-                      <img
-                        src={images[n]}
-                        alt={`Step ${n}`}
-                        data-embed="true"
-                        style={thumbImg}
-                      />
+                      <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg} />
                     ) : (
                       <div style={missing}>No image</div>
                     )}
@@ -247,42 +204,36 @@ export default function PortfolioPage() {
                 ))}
               </div>
 
-              {/* Finished Look */}
+              {/* finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
                 <div style={finishedCard}>
                   {images[4] ? (
-                    <img
-                      src={images[4]}
-                      alt="Finished Look"
-                      data-embed="true"
-                      style={finishedImg}
-                    />
+                    <img src={images[4]} alt="Finished Look" data-embed="true" style={finishedImg} />
                   ) : (
                     <div style={missing}>No final image</div>
                   )}
                 </div>
               </div>
             </div>
-            {/* /parchment */}
           </div>
-          {/* /sheet */}
         </div>
-        {/* /hatch */}
       </div>
 
-      {/* Actions */}
       <div style={{ marginTop: 18, textAlign: 'center' }}>
-        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
-          📄 Download Portfolio
-        </button>
-        <button
-          onClick={() => router.push('/challenge/submission/competition')}
-          style={{ ...btn, background: '#28a745' }}
-        >
+        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>📄 Download Portfolio</button>
+        <button onClick={() => router.push('/challenge/submission/competition')} style={{ ...btn, background: '#28a745' }}>
           ✅ Become Certified
         </button>
       </div>
+
+      {/* Responsive tweak: on small screens, stack steps 1/2/3 vertically */}
+      <style jsx>{`
+        @media (max-width: 560px) {
+          .stepsGrid { grid-template-columns: 1fr !important; gap: 16px !important; }
+          .thumbCard { min-height: unset !important; padding: 10px !important; }
+        }
+      `}</style>
     </main>
   )
 }
@@ -301,13 +252,10 @@ const pageShell = {
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
 }
 
-const container = {
-  width: 'min(800px, 95vw)'
-}
+const container = { width: 'min(800px, 95vw)' }
 
-/* Cross-hatch “margin” layer */
 const hatchWrap = {
-  padding: 22, // export temporarily sets bottom to 0px
+  padding: 22,
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -316,7 +264,6 @@ const hatchWrap = {
   backgroundColor: '#eae7df'
 }
 
-/* double-ruled sheet */
 const sheet = {
   background: '#f2ebda',
   borderRadius: 12,
@@ -324,15 +271,13 @@ const sheet = {
     'inset 0 0 0 2px #cbbfa3, inset 0 0 0 10px #f2ebda, inset 0 0 0 12px #cbbfa3'
 }
 
-/* center parchment */
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px', // baseline extra bottom padding
+  padding: '16px 16px 36px',
   color: '#111'
 }
 
-/* big, prominent black name */
 const stylistName = {
   textAlign: 'center',
   fontSize: 32,
@@ -348,7 +293,6 @@ const stepsGrid = {
   marginTop: 6
 }
 
-/* translucent plates like the logo */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
@@ -371,7 +315,7 @@ const thumbImg = {
   background: '#fff',
   border: '1px solid #eee',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const finishedWrap = { marginTop: 16 }
@@ -390,7 +334,7 @@ const finishedImg = {
   borderRadius: 12,
   background: '#fff',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
