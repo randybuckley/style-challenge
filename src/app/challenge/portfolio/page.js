@@ -147,7 +147,7 @@ export default function PortfolioPage() {
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try { img.src = await toDataURL(img.src) } catch {}
-        // --- distortion guards ---
+        // distortion guards
         img.removeAttribute('width')
         img.removeAttribute('height')
         img.style.height = 'auto'
@@ -157,7 +157,7 @@ export default function PortfolioPage() {
     await html2pdf()
       .from(root)
       .set({
-        margin: 0,                                         // no side margins
+        margin: 0,
         filename: 'style-challenge-portfolio.pdf',
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
@@ -348,7 +348,7 @@ const finishedWrap = { marginTop: 16 }
 const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
 const finishedCard = {
   background: '#fff',
-  border: '1px solid '#e6e6e6',
+  border: '1px solid #e6e6e6', // <-- fixed
   borderRadius: 16,
   boxShadow: '0 8px 22px rgba(0,0,0,.08)',
   padding: 12
