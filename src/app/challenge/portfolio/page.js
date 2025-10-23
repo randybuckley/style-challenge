@@ -15,31 +15,33 @@ export default function PortfolioPage() {
   const [isMobile, setIsMobile] = useState(false)
 
   const router = useRouter()
+
+  // Refs for export-time tweaks
   const rootRef = useRef(null)       // whole export root
   const hatchRef = useRef(null)      // cross-hatch frame
+  const stepsRef = useRef(null)      // steps grid container
+  const nameRef = useRef(null)       // name H2
+  const finishedImgRef = useRef(null)
 
-  // ---------- load profile + images ----------
+  // ---------- load/profile ----------
   useEffect(() => {
     const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq()
-    window.addEventListener('resize', mq)
+    mq(); window.addEventListener('resize', mq)
     return () => window.removeEventListener('resize', mq)
   }, [])
 
   useEffect(() => {
     const run = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
-      const sessionUser = sessionData?.session?.user
-      if (!sessionUser) return router.push('/')
-
-      setUser(sessionUser)
+      const u = sessionData?.session?.user
+      if (!u) return router.push('/')
+      setUser(u)
 
       const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, second_name, salon_name')
-        .eq('id', sessionUser.id)
+        .eq('id', u.id)
         .single()
-
       if (profile) {
         setFirstName(profile.first_name || '')
         setSecondName(profile.second_name || '')
@@ -51,7 +53,7 @@ export default function PortfolioPage() {
       const { data: rows } = await supabase
         .from('uploads')
         .select('step_number, image_url, created_at')
-        .eq('user_id', sessionUser.id)
+        .eq('user_id', u.id)
         .in('step_number', [1, 2, 3, 4])
         .order('created_at', { ascending: false })
 
@@ -69,7 +71,6 @@ export default function PortfolioPage() {
     run()
   }, [router])
 
-  // ---------- save profile ----------
   const saveProfile = async () => {
     if (!user) return
     setSaving(true)
@@ -81,12 +82,10 @@ export default function PortfolioPage() {
         second_name: (secondName || '').trim() || null,
         salon_name: (salonName || '').trim() || null
       })
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
-  // ---------- helper: embed image for crisp PDF ----------
+  // ---------- helpers ----------
   const toDataURL = (url) =>
     new Promise((resolve, reject) => {
       const img = new Image()
@@ -102,50 +101,59 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export ----------
+  // ---------- PDF export (force compact grid & heights) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
     if (!root || !hatch) return
 
-    // US Letter @ 96dpi
+    // Letter @ 96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
-    // snapshot styles
+    // snapshot styles we will touch
     const prevRoot = root.getAttribute('style') || ''
     const prevHatch = hatch.getAttribute('style') || ''
-    const prevClass = root.className
+    const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
+    const prevNameSize = nameRef.current?.style.fontSize || ''
+    const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
 
-    // full-bleed: size the root to page and remove any internal padding on hatch
+    // force full-bleed frame
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
-    hatch.style.padding = '0'         // no inner margin so cross-hatch touches page edges
+    hatch.style.padding = '0'
     hatch.style.borderRadius = '0'
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    // force a compact "pdf" layout (small top row)
-    root.classList.add('pdf-export')
+    // compact top row (always 3-across for PDF)
+    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    // smaller cards and name to guarantee one page
+    if (nameRef.current) nameRef.current.style.fontSize = '28px'
+    const thumbCards = root.querySelectorAll('[data-thumb="1"]')
+    const prevCardHeights = []
+    thumbCards.forEach(card => {
+      prevCardHeights.push(card.style.minHeight)
+      card.style.minHeight = '210px'
+    })
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    // embed imgs for crisp output
+    // embed images for crisp canvas
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
-        try {
-          img.src = await toDataURL(img.src)
-        } catch {}
+        try { img.src = await toDataURL(img.src) } catch {}
       })
     )
 
     await html2pdf()
       .from(root)
       .set({
-        margin: 0, // removes the light/white side margins
+        margin: 0,                                         // no side margins
         filename: 'style-challenge-portfolio.pdf',
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
@@ -153,11 +161,13 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore
-    originals.forEach(([img, src]) => (img.src = src))
+    // restore page styles
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    root.className = prevClass
+    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
+    if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
+    thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
   }
 
   if (loading) {
@@ -196,20 +206,18 @@ export default function PortfolioPage() {
               </div>
 
               {/* prominent name line */}
-              <h2 style={stylistName}>
+              <h2 ref={nameRef} style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps: responsive (stack on mobile, 3-across desktop) */}
+              {/* Steps: stack on mobile, 3-across on desktop; forced to 3-across only during export */}
               <div
-                style={{
-                  ...stepsGrid,
-                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
-                }}
+                ref={stepsRef}
+                style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
               >
                 {[1,2,3].map(n=>(
-                  <div key={n} style={thumbCard}>
+                  <div key={n} data-thumb="1" style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n]
                       ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
@@ -223,7 +231,7 @@ export default function PortfolioPage() {
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
                 <div style={finishedCard}>
                   {images[4]
-                    ? <img src={images[4]} alt="Finished Look" data-embed="true" style={finishedImg}/>
+                    ? <img ref={finishedImgRef} src={images[4]} alt="Finished Look" data-embed="true" style={finishedImg}/>
                     : <div style={missing}>No final image</div>}
                 </div>
               </div>
@@ -239,12 +247,6 @@ export default function PortfolioPage() {
           ✅ Become Certified
         </button>
       </div>
-
-      {/* pdf-only layout tweaks */}
-      <style>{`
-        /* When exporting we force the steps row to be smaller and 3-across */
-        .pdf-export .steps-compact { grid-template-columns: repeat(3, 1fr) !important; }
-      `}</style>
     </main>
   )
 }
