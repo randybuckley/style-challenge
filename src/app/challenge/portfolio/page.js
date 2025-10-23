@@ -12,22 +12,28 @@ export default function PortfolioPage() {
   const [salonName, setSalonName] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
 
   const router = useRouter()
-  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
-  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
+  const rootRef = useRef(null)       // whole export root
+  const hatchRef = useRef(null)      // cross-hatch frame
+
+  // ---------- load profile + images ----------
+  useEffect(() => {
+    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
+    mq()
+    window.addEventListener('resize', mq)
+    return () => window.removeEventListener('resize', mq)
+  }, [])
 
   useEffect(() => {
     const run = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
       const sessionUser = sessionData?.session?.user
-      if (!sessionUser) {
-        router.push('/')
-        return
-      }
+      if (!sessionUser) return router.push('/')
+
       setUser(sessionUser)
 
-      // profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, second_name, salon_name')
@@ -40,7 +46,6 @@ export default function PortfolioPage() {
         setSalonName(profile.salon_name || '')
       }
 
-      // latest uploads (1,2,3,4)
       const STORAGE_PREFIX =
         'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
       const { data: rows } = await supabase
@@ -64,6 +69,7 @@ export default function PortfolioPage() {
     run()
   }, [router])
 
+  // ---------- save profile ----------
   const saveProfile = async () => {
     if (!user) return
     setSaving(true)
@@ -80,125 +86,79 @@ export default function PortfolioPage() {
     }
   }
 
-  // ------- NEW: marginless “cover”-scaled PDF with fallback ------- //
+  // ---------- helper: embed image for crisp PDF ----------
+  const toDataURL = (url) =>
+    new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        c.getContext('2d').drawImage(img, 0, 0)
+        resolve(c.toDataURL('image/jpeg', 0.95))
+      }
+      img.onerror = () => reject(new Error('Could not load image'))
+      img.src = url
+    })
+
+  // ---------- PDF export ----------
   const downloadPDF = async () => {
-    const root = portfolioRef.current
-    if (!root) return
-
-    // px for US Letter at ~96dpi
-    const PDF_PX_W = 816   // 8.5in * 96
-    const PDF_PX_H = 1056  // 11in * 96
-
-    // snapshot styles we touch
+    const html2pdf = (await import('html2pdf.js')).default
+    const root = rootRef.current
     const hatch = hatchRef.current
-    const prevRootStyle = root.getAttribute('style') || ''
-    const prevHatchStyle = hatch?.getAttribute('style') || ''
+    if (!root || !hatch) return
 
-    // lock layout so cross-hatch goes to the edges
-    root.style.width = `${PDF_PX_W}px`
+    // US Letter @ 96dpi
+    const PDF_W = 816
+    const PDF_H = 1056
+
+    // snapshot styles
+    const prevRoot = root.getAttribute('style') || ''
+    const prevHatch = hatch.getAttribute('style') || ''
+    const prevClass = root.className
+
+    // full-bleed: size the root to page and remove any internal padding on hatch
+    root.style.width = `${PDF_W}px`
+    root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
-    if (hatch) {
-      hatch.style.borderRadius = '0px'
-      hatch.style.padding = '16px'
-      hatch.style.paddingBottom = '8px' // lighten bottom grey band
-      hatch.style.minHeight = `${PDF_PX_H}px`
-      hatch.style.boxShadow = 'none'
-    }
+    hatch.style.padding = '0'         // no inner margin so cross-hatch touches page edges
+    hatch.style.borderRadius = '0'
+    hatch.style.minHeight = `${PDF_H}px`
+    hatch.style.boxShadow = 'none'
 
-    // show a bit more parchment at the bottom for balance
-    const parchmentEl = root.querySelector('[data-parchment="1"]')
-    const prevParchPad = parchmentEl?.style.paddingBottom || ''
-    if (parchmentEl) parchmentEl.style.paddingBottom = '44px'
+    // force a compact "pdf" layout (small top row)
+    root.classList.add('pdf-export')
 
-    // embed remote images (crisper canvas & offline-safe)
-    const toDataURL = (url) =>
-      new Promise((resolve, reject) => {
-        const img = new Image()
-        img.crossOrigin = 'anonymous'
-        img.onload = () => {
-          const c = document.createElement('canvas')
-          c.width = img.naturalWidth
-          c.height = img.naturalHeight
-          c.getContext('2d').drawImage(img, 0, 0)
-          resolve(c.toDataURL('image/jpeg', 0.95))
-        }
-        img.onerror = () => reject(new Error('Could not load image'))
-        img.src = url
-      })
-
+    // embed imgs for crisp output
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try {
-          const dataUrl = await toDataURL(img.src)
-          img.setAttribute('src', dataUrl)
+          img.src = await toDataURL(img.src)
         } catch {}
       })
     )
 
-    // Try cover-scaling path (html2canvas + jsPDF). If not available, fall back.
-    let usedCoverPath = false
-    try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf')
-      ])
-
-      const canvas = await html2canvas(root, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: PDF_PX_W,
-        windowHeight: Math.max(PDF_PX_H, root.scrollHeight)
+    await html2pdf()
+      .from(root)
+      .set({
+        margin: 0, // removes the light/white side margins
+        filename: 'style-challenge-portfolio.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
       })
+      .save()
 
-      const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' })
-      const pageW = doc.internal.pageSize.getWidth()   // 612
-      const pageH = doc.internal.pageSize.getHeight()  // 792
-
-      const pxToPt = 0.75
-      const imgW = canvas.width * pxToPt
-      const imgH = canvas.height * pxToPt
-
-      // COVER scale → no margins (crop overflow)
-      const scale = Math.max(pageW / imgW, pageH / imgH)
-      const drawW = imgW * scale
-      const drawH = imgH * scale
-      const x = (pageW - drawW) / 2
-      const y = (pageH - drawH) / 2
-
-      doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, drawW, drawH)
-      doc.save('style-challenge-portfolio.pdf')
-      usedCoverPath = true
-    } catch {
-      // Fallback: previous html2pdf.js flow (keeps current behavior if libs missing)
-      const html2pdf = (await import('html2pdf.js')).default
-      await html2pdf()
-        .from(root)
-        .set({
-          margin: 0,
-          filename: 'style-challenge-portfolio.pdf',
-          image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-        })
-        .save()
-    }
-
-    // restore DOM
-    originals.forEach(([img, src]) => img.setAttribute('src', src))
-    if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
-    root.setAttribute('style', prevRootStyle)
-    if (hatch) hatch.setAttribute('style', prevHatchStyle)
-
-    if (!usedCoverPath) {
-      // Optional: let you know libs weren’t present (so margins may persist)
-      console.warn('Cover-scaling PDF fallback used (html2canvas/jsPDF not available).')
-    }
+    // restore
+    originals.forEach(([img, src]) => (img.src = src))
+    root.setAttribute('style', prevRoot)
+    hatch.setAttribute('style', prevHatch)
+    root.className = prevClass
   }
-  // --------------------------------------------------------------- //
 
   if (loading) {
     return (
@@ -212,116 +172,79 @@ export default function PortfolioPage() {
 
   return (
     <main style={pageShell}>
-      {/* Editable identity bar (outside certificate) */}
+      {/* editable identity bar */}
       <div style={editBar}>
-        <input
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          placeholder="First Name"
-          style={field}
-        />
-        <input
-          value={secondName}
-          onChange={(e) => setSecondName(e.target.value)}
-          placeholder="Last Name"
-          style={field}
-        />
-        <input
-          value={salonName}
-          onChange={(e) => setSalonName(e.target.value)}
-          placeholder="Salon"
-          style={{ ...field, minWidth: 220 }}
-        />
-        <button onClick={saveProfile} disabled={saving} style={btnSmall}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        <input value={firstName} onChange={(e)=>setFirstName(e.target.value)} placeholder="First Name" style={field}/>
+        <input value={secondName} onChange={(e)=>setSecondName(e.target.value)} placeholder="Last Name" style={field}/>
+        <input value={salonName} onChange={(e)=>setSalonName(e.target.value)} placeholder="Salon" style={{...field,minWidth:220}}/>
+        <button onClick={saveProfile} disabled={saving} style={btnSmall}>{saving?'Saving…':'Save'}</button>
       </div>
 
-      {/* Certificate container captured to PDF */}
-      <div ref={portfolioRef} style={container}>
-        {/* CROSS-HATCH edge-to-edge margin */}
+      {/* export root */}
+      <div ref={rootRef} style={container}>
         <div ref={hatchRef} style={hatchWrap}>
-          {/* Double-ruled “sheet” */}
           <div style={sheet}>
-            {/* PARCHMENT center */}
             <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
-              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
+              <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
                 <img
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
-                  style={{
-                    width: 220,
-                    height: 'auto',
-                    display: 'inline-block',
-                    opacity: 0.6,
-                    borderRadius: 16
-                  }}
+                  style={{ width:220, height:'auto', display:'inline-block', opacity:.6, borderRadius:16 }}
                 />
               </div>
 
-              {/* Prominent black name (no "Your Portfolio") */}
+              {/* prominent name line */}
               <h2 style={stylistName}>
                 {nameLine}
-                {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
+                {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps 1–3 (equal sizes, translucent plates like the logo) */}
-              <div style={stepsGrid}>
-                {[1, 2, 3].map((n) => (
+              {/* Steps: responsive (stack on mobile, 3-across desktop) */}
+              <div
+                style={{
+                  ...stepsGrid,
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
+                }}
+              >
+                {[1,2,3].map(n=>(
                   <div key={n} style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
-                    {images[n] ? (
-                      <img
-                        src={images[n]}
-                        alt={`Step ${n}`}
-                        data-embed="true"
-                        style={thumbImg}
-                      />
-                    ) : (
-                      <div style={missing}>No image</div>
-                    )}
+                    {images[n]
+                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
+                      : <div style={missing}>No image</div>}
                   </div>
                 ))}
               </div>
 
-              {/* Finished Look */}
+              {/* Finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
                 <div style={finishedCard}>
-                  {images[4] ? (
-                    <img
-                      src={images[4]}
-                      alt="Finished Look"
-                      data-embed="true"
-                      style={finishedImg}
-                    />
-                  ) : (
-                    <div style={missing}>No final image</div>
-                  )}
+                  {images[4]
+                    ? <img src={images[4]} alt="Finished Look" data-embed="true" style={finishedImg}/>
+                    : <div style={missing}>No final image</div>}
                 </div>
               </div>
             </div>
-            {/* /parchment */}
           </div>
-          {/* /sheet */}
         </div>
-        {/* /hatch */}
       </div>
 
-      {/* Actions */}
-      <div style={{ marginTop: 18, textAlign: 'center' }}>
-        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
-          📄 Download Portfolio
-        </button>
-        <button
-          onClick={() => router.push('/challenge/submission/competition')}
-          style={{ ...btn, background: '#28a745' }}
-        >
+      {/* actions */}
+      <div style={{ marginTop: 18, textAlign:'center' }}>
+        <button onClick={downloadPDF} style={{ ...btn, marginRight:10 }}>📄 Download Portfolio</button>
+        <button onClick={()=>router.push('/challenge/submission/competition')} style={{ ...btn, background:'#28a745' }}>
           ✅ Become Certified
         </button>
       </div>
+
+      {/* pdf-only layout tweaks */}
+      <style>{`
+        /* When exporting we force the steps row to be smaller and 3-across */
+        .pdf-export .steps-compact { grid-template-columns: repeat(3, 1fr) !important; }
+      `}</style>
     </main>
   )
 }
@@ -340,13 +263,11 @@ const pageShell = {
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
 }
 
-const container = {
-  width: 'min(800px, 95vw)'
-}
+const container = { width: 'min(800px, 95vw)' }
 
-/* Cross-hatch “margin” layer */
+/* Cross-hatch frame */
 const hatchWrap = {
-  padding: 22, // export temporarily tweaks this
+  padding: 22,
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -363,15 +284,15 @@ const sheet = {
     'inset 0 0 0 2px #cbbfa3, inset 0 0 0 10px #f2ebda, inset 0 0 0 12px #cbbfa3'
 }
 
-/* center parchment */
+/* parchment center */
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px', // baseline extra bottom padding
+  padding: '16px 16px 36px',
   color: '#111'
 }
 
-/* big, prominent black name */
+/* Name line */
 const stylistName = {
   textAlign: 'center',
   fontSize: 32,
@@ -380,6 +301,7 @@ const stylistName = {
   margin: '2px 0 14px'
 }
 
+/* Steps grid (desktop default: 3 across) */
 const stepsGrid = {
   display: 'grid',
   gridTemplateColumns: 'repeat(3, 1fr)',
@@ -387,7 +309,7 @@ const stepsGrid = {
   marginTop: 6
 }
 
-/* translucent plates like the logo */
+/* translucent “plates” like the logo */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
@@ -399,18 +321,15 @@ const thumbCard = {
   alignItems: 'center',
   minHeight: 260
 }
-
 const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBottom: 8 }
-
 const thumbImg = {
   width: '100%',
   aspectRatio: '1 / 1',
-  objectFit: 'contain',
+  objectFit: 'cover',
   borderRadius: 12,
   background: '#fff',
-  border: '1px solid #eee',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const finishedWrap = { marginTop: 16 }
@@ -429,7 +348,7 @@ const finishedImg = {
   borderRadius: 12,
   background: '#fff',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
