@@ -102,7 +102,7 @@ export default function PortfolioPage() {
     const root = portfolioRef.current
     if (!root) return
 
-    // constants for US Letter at ~96dpi
+    // US Letter at ~96dpi
     const PDF_WIDTH = 816   // 8.5in * 96
     const PDF_HEIGHT = 1056 // 11in * 96
 
@@ -111,46 +111,42 @@ export default function PortfolioPage() {
     const hatch = hatchRef.current
     const prevHatchStyle = hatch?.getAttribute('style') || ''
 
-    // lock layout so cross-hatch reaches the very edges (ring on all sides)
+    // Edge-to-edge cross-hatch ring
     root.style.width = `${PDF_WIDTH}px`
     root.style.margin = '0 auto'
     if (hatch) {
       hatch.style.borderRadius = '0px'
-      hatch.style.padding = '18px'     // ⟵ ring of cross-hatch all around (incl. bottom)
+      hatch.style.padding = '18px'          // ring on ALL sides (incl. bottom)
       hatch.style.minHeight = `${PDF_HEIGHT}px`
       hatch.style.boxShadow = 'none'
     }
 
-    // temporarily add extra parchment bottom padding so more parchment shows
+    // Let cross-hatch show through: make "sheet" transparent during export
+    const sheetEl = root.querySelector('[data-el="sheet"]')
+    const prevSheetStyle = sheetEl?.getAttribute('style') || ''
+    if (sheetEl) {
+      sheetEl.style.background = 'transparent'
+      sheetEl.style.boxShadow =
+        'inset 0 0 0 2px #cbbfa3, inset 0 0 0 12px #cbbfa3' // keep the double rule
+    }
+
+    // More parchment visible at the bottom (reduce bland band feel)
     const parchmentEl = root.querySelector('[data-parchment="1"]')
     const prevParchPad = parchmentEl?.style.paddingBottom || ''
     if (parchmentEl) parchmentEl.style.paddingBottom = '56px'
 
-    // ---- PDF-ONLY: make steps 1–3 smaller at the top ----
+    // PDF-only: reduce Steps 1–3 with a scale transform (html2canvas respects this)
     const stepGrid = root.querySelector('[data-steps="grid"]')
     const prevGridStyle = stepGrid?.getAttribute('style') || ''
     if (stepGrid) {
+      stepGrid.style.transform = 'scale(0.88)'
+      stepGrid.style.transformOrigin = 'top center'
       stepGrid.style.gap = '14px'
       stepGrid.style.marginTop = '4px'
     }
-    const thumbCards = Array.from(root.querySelectorAll('[data-thumb="1"]'))
-    const thumbImgs  = Array.from(root.querySelectorAll('[data-thumb-img="1"]'))
 
-    const cardStyles = thumbCards.map(el => el.getAttribute('style') || '')
-    const imgStyles  = thumbImgs.map(el => el.getAttribute('style') || '')
-
-    thumbCards.forEach((el) => {
-      el.style.minHeight = '170px'
-      el.style.padding = '8px'
-      el.style.borderRadius = '12px'
-      el.style.boxShadow = '0 4px 12px rgba(0,0,0,.10)'
-    })
-    thumbImgs.forEach((el) => {
-      el.style.aspectRatio = '1 / 1'
-      el.style.objectFit = 'contain'
-      el.style.opacity = '0.92'
-    })
-    // -----------------------------------------------------
+    // Wait a tick so the browser applies all style changes before snapshot
+    await new Promise((r) => requestAnimationFrame(r))
 
     // embed images marked for PDF
     const imgs = root.querySelectorAll('img[data-embed="true"]')
@@ -176,12 +172,11 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore DOM (so the live page stays identical)
+    // restore DOM (live page remains untouched)
     originals.forEach(([img, src]) => img.setAttribute('src', src))
     if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
     if (stepGrid) stepGrid.setAttribute('style', prevGridStyle)
-    thumbCards.forEach((el, i) => el.setAttribute('style', cardStyles[i]))
-    thumbImgs.forEach((el, i) => el.setAttribute('style', imgStyles[i]))
+    if (sheetEl) sheetEl.setAttribute('style', prevSheetStyle)
     root.setAttribute('style', prevRootStyle)
     if (hatch) hatch.setAttribute('style', prevHatchStyle)
   }
@@ -228,7 +223,7 @@ export default function PortfolioPage() {
         {/* CROSS-HATCH edge-to-edge margin */}
         <div ref={hatchRef} style={hatchWrap}>
           {/* Double-ruled “sheet” */}
-          <div style={sheet}>
+          <div style={sheet} data-el="sheet">
             {/* PARCHMENT center */}
             <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
@@ -333,7 +328,7 @@ const container = {
 
 /* Cross-hatch “margin” layer */
 const hatchWrap = {
-  padding: 22, // export temporarily becomes 18px all around
+  padding: 22, // PDF export temporarily becomes 18px all around
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
