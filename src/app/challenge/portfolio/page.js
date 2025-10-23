@@ -12,12 +12,11 @@ export default function PortfolioPage() {
   const [salonName, setSalonName] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-
   const [isMobile, setIsMobile] = useState(false)
 
   const router = useRouter()
-  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
-  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
+  const portfolioRef = useRef()
+  const hatchRef = useRef()
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 640)
@@ -107,7 +106,6 @@ export default function PortfolioPage() {
     })
 
   const downloadPDF = async () => {
-    // Prefer html2canvas + jsPDF for reliability
     try {
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
         import('html2canvas'),
@@ -118,8 +116,8 @@ export default function PortfolioPage() {
       if (!root) return
 
       // US Letter in CSS px at ~96dpi
-      const PDF_PX_W = 816      // 8.5in * 96
-      const PDF_PX_H = 1056     // 11in  * 96
+      const PDF_PX_W = 816
+      const PDF_PX_H = 1056
 
       // Snapshot styles we’ll temporarily override
       const hatch = hatchRef.current
@@ -128,24 +126,24 @@ export default function PortfolioPage() {
         hatch: hatch?.getAttribute('style') || '',
       }
 
-      // Lock layout so cross-hatch hits page edges
+      // Lock layout so cross-hatch hits page edges, no side gaps
       root.style.width = `${PDF_PX_W}px`
       root.style.margin = '0 auto'
       if (hatch) {
         hatch.style.borderRadius = '0px'
-        hatch.style.padding = '18px'
-        hatch.style.paddingBottom = '8px' // minimize grey at bottom
+        hatch.style.padding = '16px'       // slightly tighter than before
+        hatch.style.paddingBottom = '8px'  // minimize grey at bottom
         hatch.style.minHeight = `${PDF_PX_H}px`
         hatch.style.boxShadow = 'none'
       }
 
-      // Show MORE parchment at the bottom for PDF
+      // More parchment bottom, but keep total height in check for width-fit
       const parchmentEl = root.querySelector('[data-parchment="1"]')
       const prevParchPad = parchmentEl?.style.paddingBottom || ''
-      if (parchmentEl) parchmentEl.style.paddingBottom = '56px'
+      if (parchmentEl) parchmentEl.style.paddingBottom = '44px'
 
       // ---------- TEMP PDF-ONLY LAYOUT OVERRIDES ----------
-      // Force Steps into 3 columns small at top, big Finished below (PDF-only)
+      // Force Steps into 3 columns small at top, big Finished below
       const stepsGridEl = root.querySelector('[data-role="steps-grid"]')
       const thumbCards = root.querySelectorAll('[data-role="thumb-card"]')
       const finishedImgEl = root.querySelector('[data-role="finished-img"]')
@@ -154,18 +152,19 @@ export default function PortfolioPage() {
       if (stepsGridEl) {
         stepsGridEl.style.display = 'grid'
         stepsGridEl.style.gridTemplateColumns = 'repeat(3, 1fr)'
-        stepsGridEl.style.gap = '16px'
-        stepsGridEl.style.marginTop = '8px'
+        stepsGridEl.style.gap = '14px'
+        stepsGridEl.style.marginTop = '6px'
       }
       const prevThumbs = []
       thumbCards.forEach((el) => {
         prevThumbs.push([el, el.getAttribute('style') || ''])
-        el.style.minHeight = '210px'
+        el.style.minHeight = '200px'
         el.style.padding = '10px'
       })
       const prevFinishedStyle = finishedImgEl?.getAttribute('style') || ''
       if (finishedImgEl) {
-        finishedImgEl.style.maxHeight = '680px'
+        // slightly smaller to keep overall height within 1 page on width-fit
+        finishedImgEl.style.maxHeight = '600px'
         finishedImgEl.style.objectFit = 'contain'
         finishedImgEl.style.width = '100%'
       }
@@ -193,23 +192,32 @@ export default function PortfolioPage() {
         windowHeight: Math.max(PDF_PX_H, root.scrollHeight),
       })
 
-      // Single-page PDF, scale canvas to fit
+      // Build single-page PDF with **no left/right margin**:
       const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' })
       const pageW = doc.internal.pageSize.getWidth()
       const pageH = doc.internal.pageSize.getHeight()
 
-      const pxToPt = 0.75 // 96dpi px -> 72dpi pt
-      let imgW = canvas.width * pxToPt
-      let imgH = canvas.height * pxToPt
+      const pxToPt = 0.75 // 96 -> 72 dpi
+      const imgWpt = canvas.width * pxToPt
+      const imgHpt = canvas.height * pxToPt
 
-      const s = Math.min(pageW / imgW, pageH / imgH) // fit to one page
-      imgW *= s
-      imgH *= s
+      // Fill width first (no side margins). If too tall, fall back to "fit page".
+      let scaleW = pageW / imgWpt
+      let scaledH = imgHpt * scaleW
+      let useScale = scaleW
+      if (scaledH > pageH) {
+        // fallback: fit-to-page to avoid cropping (adds small margins if needed)
+        const scaleFit = Math.min(pageW / imgWpt, pageH / imgHpt)
+        useScale = scaleFit
+        scaledH = imgHpt * useScale
+      }
 
-      const x = (pageW - imgW) / 2
-      const y = (pageH - imgH) / 2
+      const drawW = imgWpt * useScale
+      const drawH = scaledH
+      const x = (drawW === pageW) ? 0 : (pageW - drawW) / 2   // 0 if width-fit
+      const y = (pageH - drawH) / 2                            // center vertically
 
-      doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, imgW, imgH)
+      doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, drawW, drawH)
       doc.save('style-challenge-portfolio.pdf')
 
       // Restore DOM
@@ -221,7 +229,6 @@ export default function PortfolioPage() {
       thumbCards.forEach((el, i) => el.setAttribute('style', prevThumbs[i][1]))
       if (finishedImgEl) finishedImgEl.setAttribute('style', prevFinishedStyle)
     } catch (e) {
-      // Fallback path (rare). If you want, we can add a basic html2pdf fallback here.
       alert('PDF render failed. Please try again.')
     }
   }
@@ -291,7 +298,7 @@ export default function PortfolioPage() {
                 />
               </div>
 
-              {/* Prominent black name (no "Your Portfolio") */}
+              {/* Prominent black name */}
               <h2 style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
@@ -371,9 +378,7 @@ const pageShell = {
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
 }
 
-const container = {
-  width: 'min(800px, 95vw)'
-}
+const container = { width: 'min(800px, 95vw)' }
 
 /* Cross-hatch “margin” layer */
 const hatchWrap = {
@@ -398,7 +403,7 @@ const sheet = {
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px', // baseline extra bottom padding; raised in PDF
+  padding: '16px 16px 36px', // baseline; lifted to 44px in PDF to show more parchment
   color: '#111'
 }
 
@@ -441,7 +446,7 @@ const thumbImg = {
   background: '#fff',
   border: '1px solid #eee',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const finishedWrap = { marginTop: 16 }
@@ -460,7 +465,7 @@ const finishedImg = {
   borderRadius: 12,
   background: '#fff',
   display: 'block',
-  opacity: 0.92   // slightly opaque
+  opacity: 0.92
 }
 
 const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
