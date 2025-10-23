@@ -140,13 +140,17 @@ export default function PortfolioPage() {
     })
     if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    // embed images for crisp canvas
+    // embed images for crisp canvas (and prevent any forced distortion)
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try { img.src = await toDataURL(img.src) } catch {}
+        // --- distortion guards ---
+        img.removeAttribute('width')
+        img.removeAttribute('height')
+        img.style.height = 'auto'
       })
     )
 
@@ -211,7 +215,7 @@ export default function PortfolioPage() {
                 {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps: stack on mobile, 3-across on desktop; forced to 3-across only during export */}
+              {/* Steps */}
               <div
                 ref={stepsRef}
                 style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
@@ -231,7 +235,13 @@ export default function PortfolioPage() {
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
                 <div style={finishedCard}>
                   {images[4]
-                    ? <img ref={finishedImgRef} src={images[4]} alt="Finished Look" data-embed="true" style={finishedImg}/>
+                    ? <img
+                        ref={finishedImgRef}
+                        src={images[4]}
+                        alt="Finished Look"
+                        data-embed="true"
+                        style={finishedImg}
+                      />
                     : <div style={missing}>No final image</div>}
                 </div>
               </div>
@@ -338,13 +348,14 @@ const finishedWrap = { marginTop: 16 }
 const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
 const finishedCard = {
   background: '#fff',
-  border: '1px solid #e6e6e6',
+  border: '1px solid '#e6e6e6',
   borderRadius: 16,
   boxShadow: '0 8px 22px rgba(0,0,0,.08)',
   padding: 12
 }
 const finishedImg = {
   width: '100%',
+  height: 'auto',     // keep intrinsic aspect ratio
   maxHeight: 680,
   objectFit: 'contain',
   borderRadius: 12,
