@@ -14,8 +14,7 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
 
   const router = useRouter()
-  const portfolioRef = useRef()   // whole certificate area (captured to PDF)
-  const hatchRef = useRef()       // outer cross-hatch layer (edge-to-edge in PDF)
+  const portfolioRef = useRef()   // on-screen certificate container
 
   useEffect(() => {
     const run = async () => {
@@ -80,105 +79,178 @@ export default function PortfolioPage() {
     }
   }
 
-  // embed an image for crisp PDF
+  // Convert remote image -> data URL for html2canvas (prevents blank PDF)
   const toDataURL = (url) =>
     new Promise((resolve, reject) => {
+      if (!url) return resolve(null)
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d')
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        const ctx = c.getContext('2d')
         ctx.drawImage(img, 0, 0)
-        resolve(canvas.toDataURL('image/jpeg', 0.95))
+        resolve(c.toDataURL('image/jpeg', 0.95))
       }
-      img.onerror = () => reject(new Error('Could not load image'))
+      img.onerror = () => resolve(null) // be lenient; don’t fail whole PDF
       img.src = url
     })
 
-  // Robust single-page PDF: render from a live, invisible clone at US Letter size.
+  // Build a hidden, print-only DOM and export it to a single-page PDF
   const downloadPDF = async () => {
-    const mod = await import('html2pdf.js')
-    const html2pdf = mod.default || mod
+    const html2pdf = (await import('html2pdf.js')).default
 
-    const src = portfolioRef.current
-    if (!src) return
+    // Embed all images first (so no CORS/taint issues)
+    const [s1, s2, s3, fin] = await Promise.all([
+      toDataURL(images[1]),
+      toDataURL(images[2]),
+      toDataURL(images[3]),
+      toDataURL(images[4]),
+    ])
 
-    // US Letter at CSS px (~96dpi)
-    const PDF_W = 816   // 8.5in * 96
-    const PDF_H = 1056  // 11in * 96
+    // US Letter @ ~96dpi canvas
+    const W = 816, H = 1056
 
-    // build a live, invisible clone so it has real layout
-    const clone = src.cloneNode(true)
-    Object.assign(clone.style, {
-      width: `${PDF_W}px`,
-      height: `${PDF_H}px`,
-      position: 'fixed',
-      left: '0',
-      top: '0',
-      zIndex: '-1',
-      opacity: '0',        // invisible but laid out
-      pointerEvents: 'none',
-      margin: '0'
-    })
+    // Build an off-screen node
+    const host = document.createElement('div')
+    host.style.position = 'fixed'
+    host.style.left = '-10000px'
+    host.style.top = '0'
+    host.style.zIndex = '-1'
 
-    // tighten cross-hatch bottom to avoid a heavy grey band
-    const hatchClone = clone.querySelector('[data-hatch="1"]')
-    if (hatchClone) {
-      hatchClone.style.borderRadius = '0'
-      hatchClone.style.minHeight = `${PDF_H}px`
-      hatchClone.style.boxShadow = 'none'
-      hatchClone.style.padding = '18px 18px 0 18px'
-    }
+    // Compose the print layout (small steps row at top, big finished below)
+    const fullName = [firstName, secondName].filter(Boolean).join(' ') || (user?.email ?? '')
 
-    // show a bit more parchment inside for the bottom edge
-    const parchmentClone = clone.querySelector('[data-parchment="1"]')
-    const prevParchPad = parchmentClone?.style.paddingBottom || ''
-    if (parchmentClone) {
-      parchmentClone.style.paddingBottom = '56px'
-    }
+    host.innerHTML = `
+      <div id="pdf-root" style="width:${W}px;height:${H}px;box-sizing:border-box;">
+        <style>
+          .hatch {
+            width: 100%; height: 100%;
+            padding: 18px;
+            background:
+              repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, rgba(0,0,0,0) 2px 7px),
+              repeating-linear-gradient(0deg,  rgba(0,0,0,.045) 0 2px, rgba(0,0,0,0) 2px 7px);
+            background-color: #eae7df;
+            border-radius: 0;
+          }
+          .sheet {
+            width: 100%; height: 100%;
+            box-sizing: border-box;
+            background: #f2ebda;
+            border-radius: 10px;
+            box-shadow:
+              inset 0 0 0 2px #cbbfa3,
+              inset 0 0 0 10px #f2ebda,
+              inset 0 0 0 12px #cbbfa3;
+            padding: 12px;
+          }
+          .parch {
+            width: 100%; height: 100%;
+            box-sizing: border-box;
+            background: url('/parchment.jpg') repeat, #f3ecdc;
+            border-radius: 10px;
+            padding: 14px 14px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
+            color: #111;
+          }
+          .logoWrap { text-align: center; margin: 2px 0 4px; }
+          .logo {
+            width: 220px; height: auto; display: inline-block;
+            opacity: .6; border-radius: 16px;
+          }
+          .name {
+            margin: 2px 0 8px; text-align: center;
+            font-size: 32px; font-weight: 900; color: #000;
+          }
+          .name small { font-weight: 500; }
+          .row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            margin-top: 6px;
+          }
+          .thumb {
+            background: rgba(255,255,255,.60);
+            border: 1px solid rgba(255,255,255,.82);
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(0,0,0,.12);
+            padding: 8px;
+            min-height: 190px;
+            display: flex; flex-direction: column; align-items: center;
+          }
+          .thumbLabel { font-weight: 700; font-size: 13px; color: #5b5b5b; margin-bottom: 6px; }
+          .thumbImg {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: contain;
+            border-radius: 10px;
+            border: 1px solid #eee;
+            background: #fff;
+            opacity: .92;
+          }
+          .finBlock { margin-top: 10px; }
+          .finLabel { text-align:center; font-weight:700; margin-bottom: 8px; }
+          .finCard {
+            background: #fff; border: 1px solid #e6e6e6; border-radius: 16px;
+            box-shadow: 0 8px 22px rgba(0,0,0,.08);
+            padding: 10px;
+          }
+          .finImg {
+            width: 100%; max-height: 640px; object-fit: contain; display:block;
+            border-radius: 12px; background:#fff; opacity:.92;
+          }
+        </style>
 
-    // embed images marked for export
-    const imgs = clone.querySelectorAll('img[data-embed="true"]')
-    await Promise.all(
-      Array.from(imgs).map(async (img) => {
-        try {
-          const dataUrl = await toDataURL(img.src)
-          img.removeAttribute('crossorigin')
-          img.src = dataUrl
-        } catch {
-          // keep going if one image fails
-        }
+        <div class="hatch">
+          <div class="sheet">
+            <div class="parch">
+              <div class="logoWrap">
+                <img class="logo" src="/logo.jpeg" alt="Style Challenge" />
+              </div>
+              <div class="name">
+                ${fullName}${salonName ? ` <small>— ${escapeHtml(salonName)}</small>` : ''}
+              </div>
+
+              <div class="row">
+                ${thumbCell(1, s1)}
+                ${thumbCell(2, s2)}
+                ${thumbCell(3, s3)}
+              </div>
+
+              <div class="finBlock">
+                <div class="finLabel">Finished Look — Challenge Number One</div>
+                <div class="finCard">
+                  ${fin ? `<img class="finImg" src="${fin}"/>` : `<div style="color:#888;font-style:italic;text-align:center;padding:40px 0">No final image</div>`}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+
+    document.body.appendChild(host)
+
+    // Use only the print node (first child)
+    const node = host.querySelector('#pdf-root')
+
+    await html2pdf()
+      .from(node)
+      .set({
+        margin: 0,
+        filename: 'style-challenge-portfolio.pdf',
+        image: { type: 'jpeg', quality: 0.96 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all'] } // force single page
       })
-    )
+      .save()
 
-    // attach clone so html2canvas can measure it
-    document.body.appendChild(clone)
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-
-    try {
-      await html2pdf()
-        .from(clone)
-        .set({
-          margin: 0,
-          filename: 'style-challenge-portfolio.pdf',
-          image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            backgroundColor: '#ffffff',
-            windowWidth: PDF_W,
-            windowHeight: PDF_H
-          },
-          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-        })
-        .save()
-    } finally {
-      if (parchmentClone) parchmentClone.style.paddingBottom = prevParchPad
-      clone.remove()
-    }
+    document.body.removeChild(host)
   }
 
   if (loading) {
@@ -218,20 +290,15 @@ export default function PortfolioPage() {
         </button>
       </div>
 
-      {/* Certificate container captured to PDF */}
+      {/* Certificate container (on-screen only) */}
       <div ref={portfolioRef} style={container}>
-        {/* CROSS-HATCH edge-to-edge margin */}
-        <div ref={hatchRef} style={hatchWrap} data-hatch="1">
-          {/* Double-ruled “sheet” */}
+        <div style={hatchWrap}>
           <div style={sheet}>
-            {/* PARCHMENT center */}
-            <div style={parchment} data-parchment="1">
-              {/* translucent rounded logo */}
+            <div style={parchment}>
               <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
                 <img
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
-                  data-embed="true"
                   style={{
                     width: 220,
                     height: 'auto',
@@ -242,14 +309,14 @@ export default function PortfolioPage() {
                 />
               </div>
 
-              {/* Prominent black name (no "Your Portfolio") */}
+              {/* Big, prominent name */}
               <h2 style={stylistName}>
                 {nameLine}
                 {salonName ? <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps 1–3 */}
-              <div style={stepsGrid}>
+              {/* Steps 1–3: desktop = 3 cols, mobile = 1 col */}
+              <div className="stepsGrid" style={stepsGrid}>
                 {[1, 2, 3].map((n) => (
                   <div key={n} style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
@@ -257,7 +324,6 @@ export default function PortfolioPage() {
                       <img
                         src={images[n]}
                         alt={`Step ${n}`}
-                        data-embed="true"
                         style={thumbImg}
                       />
                     ) : (
@@ -275,7 +341,6 @@ export default function PortfolioPage() {
                     <img
                       src={images[4]}
                       alt="Finished Look"
-                      data-embed="true"
                       style={finishedImg}
                     />
                   ) : (
@@ -284,11 +349,8 @@ export default function PortfolioPage() {
                 </div>
               </div>
             </div>
-            {/* /parchment */}
           </div>
-          {/* /sheet */}
         </div>
-        {/* /hatch */}
       </div>
 
       {/* Actions */}
@@ -303,8 +365,44 @@ export default function PortfolioPage() {
           ✅ Become Certified
         </button>
       </div>
+
+      {/* Mobile-only override for steps grid (keeps page layout correct) */}
+      <style jsx>{`
+        @media (max-width: 640px) {
+          .stepsGrid {
+            grid-template-columns: 1fr !important; /* override inline grid */
+          }
+        }
+      `}</style>
     </main>
   )
+}
+
+/* ============ helpers for PDF string HTML ============ */
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function thumbCell(n, dataUrl) {
+  const label = `Step ${n}`
+  if (!dataUrl) {
+    return `
+      <div class="thumb">
+        <div class="thumbLabel">${label}</div>
+        <div style="color:#888;font-style:italic;margin-top:8px">No image</div>
+      </div>`
+  }
+  return `
+    <div class="thumb">
+      <div class="thumbLabel">${label}</div>
+      <img class="thumbImg" src="${dataUrl}" />
+    </div>`
 }
 
 /* ===================== styles ===================== */
@@ -321,13 +419,11 @@ const pageShell = {
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
 }
 
-const container = {
-  width: 'min(800px, 95vw)'
-}
+const container = { width: 'min(800px, 95vw)' }
 
 /* Cross-hatch “margin” layer */
 const hatchWrap = {
-  padding: 22, // export temporarily sets bottom to 0px
+  padding: 22,
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -348,7 +444,7 @@ const sheet = {
 const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
-  padding: '16px 16px 36px', // baseline extra bottom padding
+  padding: '16px 16px 24px',
   color: '#111'
 }
 
@@ -361,6 +457,7 @@ const stylistName = {
   margin: '2px 0 14px'
 }
 
+/* desktop: 3 cols; mobile override via styled-jsx above */
 const stepsGrid = {
   display: 'grid',
   gridTemplateColumns: 'repeat(3, 1fr)',
@@ -368,6 +465,7 @@ const stepsGrid = {
   marginTop: 6
 }
 
+/* translucent plates like the logo */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
