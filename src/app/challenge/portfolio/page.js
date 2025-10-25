@@ -16,19 +16,18 @@ export default function PortfolioPage() {
 
   const router = useRouter()
 
-  // Refs (used for PDF export-time tweaks)
-  const rootRef = useRef(null)
-  const hatchRef = useRef(null)
-  const stepsRef = useRef(null)
-  const nameRef = useRef(null)
-  const finishedImgRef = useRef(null)
+  // Refs used during export-time layout tweaks
+  const rootRef = useRef(null)        // whole export root
+  const hatchRef = useRef(null)       // cross-hatch frame
+  const sheetRef = useRef(null)       // double-ruled sheet
+  const stepsRef = useRef(null)       // steps grid container
+  const nameRef = useRef(null)        // H2 name
+  const finishedImgRef = useRef(null) // finished look image
 
   // ---------- load/profile ----------
   useEffect(() => {
-    const mq = () =>
-      setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq()
-    window.addEventListener('resize', mq)
+    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
+    mq(); window.addEventListener('resize', mq)
     return () => window.removeEventListener('resize', mq)
   }, [])
 
@@ -36,10 +35,7 @@ export default function PortfolioPage() {
     const run = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
       const u = sessionData?.session?.user
-      if (!u) {
-        router.push('/')
-        return
-      }
+      if (!u) return router.push('/')
       setUser(u)
 
       const { data: profile } = await supabase
@@ -56,6 +52,7 @@ export default function PortfolioPage() {
 
       const STORAGE_PREFIX =
         'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+
       const { data: rows } = await supabase
         .from('uploads')
         .select('step_number, image_url, created_at')
@@ -88,9 +85,7 @@ export default function PortfolioPage() {
         second_name: (secondName || '').trim() || null,
         salon_name: (salonName || '').trim() || null
       })
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
   // ---------- helpers ----------
@@ -109,60 +104,31 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // Live-page fit: never stretch portrait Finished Look horizontally
-  const fitFinishedForScreen = () => {
-    const el = finishedImgRef.current
-    if (!el) return
-    const nw = el.naturalWidth || 0
-    const nh = el.naturalHeight || 0
-    // reset then re-apply based on orientation
-    el.style.width = ''
-    el.style.height = ''
-    el.style.maxHeight = '680px'
-    el.style.maxWidth = '100%'
-    el.style.objectFit = 'contain'
-    if (nw && nh && nh > nw) {
-      // portrait: constrain by height, let width be auto
-      el.style.height = '680px'
-      el.style.width = 'auto'
-    } else {
-      // landscape or square: normal full-width
-      el.style.width = '100%'
-      el.style.height = 'auto'
-    }
-  }
-
-  // Call screen fit whenever the Finished Look image changes/loads
-  useEffect(() => {
-    const el = finishedImgRef.current
-    if (!el) return
-    if (el.complete) fitFinishedForScreen()
-    el.addEventListener('load', fitFinishedForScreen)
-    return () => el.removeEventListener('load', fitFinishedForScreen)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images[4]])
-
-  // ---------- PDF export (compact layout + crisp images) ----------
+  // ---------- PDF export (compact grid & full-height parchment) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
-    if (!root || !hatch) return
+    const sheet = sheetRef.current
+    if (!root || !hatch || !sheet) return
 
     // Letter @ ~96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
-    // snapshot styles we will touch
+    // grab elements we’ll touch
+    const parchmentEl = root.querySelector('[data-parchment="1"]')
+
+    // snapshot styles
     const prevRoot = root.getAttribute('style') || ''
     const prevHatch = hatch.getAttribute('style') || ''
+    const prevSheet = sheet.getAttribute('style') || ''
+    const prevParch = parchmentEl?.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
     const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
-    const finishedCardEl = root.querySelector('[data-el="finishedCard"]')
-    const prevFinishedCardMB = finishedCardEl?.style.marginBottom || ''
 
-    // full-bleed frame in export (no grey band)
+    // full-bleed frame + full-height sheet/parchment (no grey band)
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
@@ -170,53 +136,39 @@ export default function PortfolioPage() {
     hatch.style.borderRadius = '0'
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
+    sheet.style.minHeight = `${PDF_H}px`
+    if (parchmentEl) {
+      parchmentEl.style.minHeight = `${PDF_H - 4}px`
+      parchmentEl.style.paddingBottom = '40px' // small sliver of parchment under the photo
+    }
 
-    // make sure we leave a subtle parchment sliver at the very bottom
-    const parchmentEl = root.querySelector('[data-parchment="1"]')
-    const prevParchPad = parchmentEl?.style.paddingBottom || ''
-    if (parchmentEl) parchmentEl.style.paddingBottom = '26px'
-    if (finishedCardEl) finishedCardEl.style.marginBottom = '8px'
-
-    // compact top row (always 3 across for PDF)
+    // compact top row (always 3-across for PDF)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
-    // slightly smaller name/cards for one-page fit
+    // slightly smaller name + cards so we always fit on 1 page
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
-    thumbCards.forEach((card) => {
+    thumbCards.forEach(card => {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
 
-    // Finished Look: orientation-aware sizing (no horizontal stretch)
+    // finished image: never stretch, fit box
     if (finishedImgRef.current) {
-      const el = finishedImgRef.current
-      const nw = el.naturalWidth || 0
-      const nh = el.naturalHeight || 0
-      el.style.maxHeight = '520px'
-      el.style.maxWidth = '100%'
-      el.style.objectFit = 'contain'
-      el.style.aspectRatio = 'auto'
-      if (nw && nh && nh > nw) {
-        // portrait
-        el.style.width = 'auto'
-        el.style.height = '520px'
-      } else {
-        // landscape or square
-        el.style.width = '100%'
-        el.style.height = 'auto'
-      }
+      finishedImgRef.current.style.maxHeight = '460px'
+      finishedImgRef.current.style.maxWidth = '100%'
+      finishedImgRef.current.style.width = 'auto'
+      finishedImgRef.current.style.height = 'auto'
+      finishedImgRef.current.style.objectFit = 'contain'
     }
 
-    // embed images so html2canvas sees crisp pixels & no forced dimensions
+    // embed images for crisp canvas
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
-        try {
-          img.src = await toDataURL(img.src)
-        } catch {}
+        try { img.src = await toDataURL(img.src) } catch {}
         img.removeAttribute('width')
         img.removeAttribute('height')
         img.style.height = 'auto'
@@ -234,11 +186,11 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore page styles
+    // restore styles
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
-    if (finishedCardEl) finishedCardEl.style.marginBottom = prevFinishedCardMB
+    sheet.setAttribute('style', prevSheet)
+    if (parchmentEl) parchmentEl.setAttribute('style', prevParch)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
@@ -259,79 +211,44 @@ export default function PortfolioPage() {
     <main style={pageShell}>
       {/* editable identity bar */}
       <div style={editBar}>
-        <input
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          placeholder="First Name"
-          style={field}
-        />
-        <input
-          value={secondName}
-          onChange={(e) => setSecondName(e.target.value)}
-          placeholder="Last Name"
-          style={field}
-        />
-        <input
-          value={salonName}
-          onChange={(e) => setSalonName(e.target.value)}
-          placeholder="Salon"
-          style={{ ...field, minWidth: 220 }}
-        />
-        <button onClick={saveProfile} disabled={saving} style={btnSmall}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        <input value={firstName} onChange={(e)=>setFirstName(e.target.value)} placeholder="First Name" style={field}/>
+        <input value={secondName} onChange={(e)=>setSecondName(e.target.value)} placeholder="Last Name" style={field}/>
+        <input value={salonName} onChange={(e)=>setSalonName(e.target.value)} placeholder="Salon" style={{...field,minWidth:220}}/>
+        <button onClick={saveProfile} disabled={saving} style={btnSmall}>{saving?'Saving…':'Save'}</button>
       </div>
 
       {/* export root */}
       <div ref={rootRef} style={container}>
         <div ref={hatchRef} style={hatchWrap}>
-          <div style={sheet}>
+          <div ref={sheetRef} style={sheet} data-sheet="1">
             <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
-              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
+              <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
                 <img
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
-                  style={{
-                    width: 220,
-                    height: 'auto',
-                    display: 'inline-block',
-                    opacity: 0.6,
-                    borderRadius: 16
-                  }}
+                  style={{ width:220, height:'auto', display:'inline-block', opacity:.6, borderRadius:16 }}
                 />
               </div>
 
               {/* prominent name line */}
               <h2 ref={nameRef} style={stylistName}>
                 {nameLine}
-                {salonName ? (
-                  <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span>
-                ) : null}
+                {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
               </h2>
 
-              {/* Steps (stack on mobile; 3-across on desktop; PDF forces 3-across) */}
+              {/* Steps */}
               <div
                 ref={stepsRef}
-                style={{
-                  ...stepsGrid,
-                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
-                }}
+                style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
               >
-                {[1, 2, 3].map((n) => (
+                {[1,2,3].map(n=>(
                   <div key={n} data-thumb="1" style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
-                    {images[n] ? (
-                      <img
-                        src={images[n]}
-                        alt={`Step ${n}`}
-                        data-embed="true"
-                        style={thumbImg}
-                      />
-                    ) : (
-                      <div style={missing}>No image</div>
-                    )}
+                    {images[n]
+                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
+                      : <div style={missing}>No image</div>}
                   </div>
                 ))}
               </div>
@@ -339,18 +256,16 @@ export default function PortfolioPage() {
               {/* Finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
-                <div style={finishedCard} data-el="finishedCard">
-                  {images[4] ? (
-                    <img
-                      ref={finishedImgRef}
-                      src={images[4]}
-                      alt="Finished Look"
-                      data-embed="true"
-                      style={finishedImg}
-                    />
-                  ) : (
-                    <div style={missing}>No final image</div>
-                  )}
+                <div style={finishedCard}>
+                  {images[4]
+                    ? <img
+                        ref={finishedImgRef}
+                        src={images[4]}
+                        alt="Finished Look"
+                        data-embed="true"
+                        style={finishedImg}
+                      />
+                    : <div style={missing}>No final image</div>}
                 </div>
               </div>
             </div>
@@ -359,14 +274,9 @@ export default function PortfolioPage() {
       </div>
 
       {/* actions */}
-      <div style={{ marginTop: 18, textAlign: 'center' }}>
-        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
-          📄 Download Portfolio
-        </button>
-        <button
-          onClick={() => router.push('/challenge/submission/competition')}
-          style={{ ...btn, background: '#28a745' }}
-        >
+      <div style={{ marginTop: 18, textAlign:'center' }}>
+        <button onClick={downloadPDF} style={{ ...btn, marginRight:10 }}>📄 Download Portfolio</button>
+        <button onClick={()=>router.push('/challenge/submission/competition')} style={{ ...btn, background:'#28a745' }}>
           ✅ Become Certified
         </button>
       </div>
@@ -390,9 +300,9 @@ const pageShell = {
 
 const container = { width: 'min(800px, 95vw)' }
 
-/* Cross-hatch frame (trimmed bottom on live page) */
+/* Cross-hatch frame */
 const hatchWrap = {
-  padding: '22px 22px 14px',
+  padding: 22,
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -450,7 +360,7 @@ const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBott
 const thumbImg = {
   width: '100%',
   aspectRatio: '1 / 1',
-  objectFit: 'cover',
+  objectFit: 'cover', // thumbs fill their square
   borderRadius: 12,
   background: '#fff',
   display: 'block',
@@ -464,17 +374,21 @@ const finishedCard = {
   border: '1px solid #e6e6e6',
   borderRadius: 16,
   boxShadow: '0 8px 22px rgba(0,0,0,.08)',
-  padding: 12
+  padding: 12,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
 }
 const finishedImg = {
-  width: '100%',
-  height: 'auto',          // keep intrinsic aspect ratio
-  maxHeight: 680,
-  objectFit: 'contain',    // no crop/stretch
-  aspectRatio: 'auto',
+  maxWidth: '100%',   // key: never stretch wide
+  maxHeight: 680,     // desktop live page cap
+  width: 'auto',
+  height: 'auto',     // preserve intrinsic aspect
+  objectFit: 'contain',
   borderRadius: 12,
   background: '#fff',
   display: 'block',
+  margin: '0 auto',
   opacity: 0.92
 }
 
