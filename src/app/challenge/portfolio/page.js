@@ -109,6 +109,39 @@ export default function PortfolioPage() {
       img.src = url
     })
 
+  // Live-page fit: never stretch portrait Finished Look horizontally
+  const fitFinishedForScreen = () => {
+    const el = finishedImgRef.current
+    if (!el) return
+    const nw = el.naturalWidth || 0
+    const nh = el.naturalHeight || 0
+    // reset then re-apply based on orientation
+    el.style.width = ''
+    el.style.height = ''
+    el.style.maxHeight = '680px'
+    el.style.maxWidth = '100%'
+    el.style.objectFit = 'contain'
+    if (nw && nh && nh > nw) {
+      // portrait: constrain by height, let width be auto
+      el.style.height = '680px'
+      el.style.width = 'auto'
+    } else {
+      // landscape or square: normal full-width
+      el.style.width = '100%'
+      el.style.height = 'auto'
+    }
+  }
+
+  // Call screen fit whenever the Finished Look image changes/loads
+  useEffect(() => {
+    const el = finishedImgRef.current
+    if (!el) return
+    if (el.complete) fitFinishedForScreen()
+    el.addEventListener('load', fitFinishedForScreen)
+    return () => el.removeEventListener('load', fitFinishedForScreen)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images[4]])
+
   // ---------- PDF export (compact layout + crisp images) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
@@ -126,6 +159,8 @@ export default function PortfolioPage() {
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
     const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
+    const finishedCardEl = root.querySelector('[data-el="finishedCard"]')
+    const prevFinishedCardMB = finishedCardEl?.style.marginBottom || ''
 
     // full-bleed frame in export (no grey band)
     root.style.width = `${PDF_W}px`
@@ -136,14 +171,15 @@ export default function PortfolioPage() {
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    // add extra parchment bottom so the page doesn’t look chopped
+    // make sure we leave a subtle parchment sliver at the very bottom
     const parchmentEl = root.querySelector('[data-parchment="1"]')
     const prevParchPad = parchmentEl?.style.paddingBottom || ''
-    if (parchmentEl) parchmentEl.style.paddingBottom = '54px'
+    if (parchmentEl) parchmentEl.style.paddingBottom = '26px'
+    if (finishedCardEl) finishedCardEl.style.marginBottom = '8px'
 
     // compact top row (always 3 across for PDF)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
-    // slightly smaller elements for guaranteed one-page fit
+    // slightly smaller name/cards for one-page fit
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
@@ -151,12 +187,25 @@ export default function PortfolioPage() {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
+
+    // Finished Look: orientation-aware sizing (no horizontal stretch)
     if (finishedImgRef.current) {
-      finishedImgRef.current.style.width = '100%'
-      finishedImgRef.current.style.height = 'auto'
-      finishedImgRef.current.style.maxHeight = '520px'
-      finishedImgRef.current.style.objectFit = 'contain'
-      finishedImgRef.current.style.aspectRatio = 'auto'
+      const el = finishedImgRef.current
+      const nw = el.naturalWidth || 0
+      const nh = el.naturalHeight || 0
+      el.style.maxHeight = '520px'
+      el.style.maxWidth = '100%'
+      el.style.objectFit = 'contain'
+      el.style.aspectRatio = 'auto'
+      if (nw && nh && nh > nw) {
+        // portrait
+        el.style.width = 'auto'
+        el.style.height = '520px'
+      } else {
+        // landscape or square
+        el.style.width = '100%'
+        el.style.height = 'auto'
+      }
     }
 
     // embed images so html2canvas sees crisp pixels & no forced dimensions
@@ -189,6 +238,7 @@ export default function PortfolioPage() {
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
     if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
+    if (finishedCardEl) finishedCardEl.style.marginBottom = prevFinishedCardMB
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
@@ -289,7 +339,7 @@ export default function PortfolioPage() {
               {/* Finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
-                <div style={finishedCard}>
+                <div style={finishedCard} data-el="finishedCard">
                   {images[4] ? (
                     <img
                       ref={finishedImgRef}
@@ -421,7 +471,7 @@ const finishedImg = {
   height: 'auto',          // keep intrinsic aspect ratio
   maxHeight: 680,
   objectFit: 'contain',    // no crop/stretch
-  aspectRatio: 'auto',     // modern hint for correct ratio
+  aspectRatio: 'auto',
   borderRadius: 12,
   background: '#fff',
   display: 'block',
