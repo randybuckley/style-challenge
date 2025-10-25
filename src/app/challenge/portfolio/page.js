@@ -16,15 +16,12 @@ export default function PortfolioPage() {
 
   const router = useRouter()
 
-  // Refs (we only tweak styles during PDF export)
-  const rootRef = useRef(null)        // whole export root
-  const hatchRef = useRef(null)       // cross-hatch frame
-  const stepsRef = useRef(null)       // steps grid container
-  const nameRef = useRef(null)        // name H2
-  const parchmentRef = useRef(null)   // parchment center
-  const finishedWrapRef = useRef(null) // wrapper around finished card
-  const finishedCardRef = useRef(null) // the white rounded “card”
-  const finishedImgRef = useRef(null)  // finished look <img>
+  // Refs for export-time tweaks
+  const rootRef = useRef(null)       // whole export root
+  const hatchRef = useRef(null)      // cross-hatch frame
+  const stepsRef = useRef(null)      // steps grid container
+  const nameRef = useRef(null)       // name H2
+  const finishedImgRef = useRef(null)
 
   // ---------- load/profile ----------
   useEffect(() => {
@@ -104,39 +101,25 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export (no page changes) ----------
+  // ---------- PDF export (force compact grid & heights) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
-    const steps = stepsRef.current
-    const nameEl = nameRef.current
-    const parch = parchmentRef.current
-    const finWrap = finishedWrapRef.current
-    const finCard = finishedCardRef.current
-    const finImg = finishedImgRef.current
-    if (!root || !hatch || !steps || !nameEl || !parch || !finWrap || !finCard || !finImg) return
+    if (!root || !hatch) return
 
     // Letter @ 96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
-    // snapshot styles
+    // snapshot styles we will touch
     const prevRoot = root.getAttribute('style') || ''
     const prevHatch = hatch.getAttribute('style') || ''
-    const prevStepsCols = steps.style.gridTemplateColumns || ''
-    const prevNameSize = nameEl.style.fontSize || ''
-    const prevParchPadB = parch.style.paddingBottom || ''
+    const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
+    const prevNameSize = nameRef.current?.style.fontSize || ''
+    const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
 
-    // finished block snapshots
-    const prevFWTextAlign = finWrap.style.textAlign || ''
-    const prevCardDisplay  = finCard.style.display || ''
-    const prevCardWidth    = finCard.style.width || ''
-    const prevImgWidth     = finImg.style.width || ''
-    const prevImgHeight    = finImg.style.height || ''
-    const prevImgMaxH      = finImg.style.maxHeight || ''
-
-    // full-bleed frame to kill grey strip & keep one page
+    // force full-bleed frame
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
@@ -144,31 +127,30 @@ export default function PortfolioPage() {
     hatch.style.borderRadius = '0'
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
-    // tiny extra parchment at bottom so it never looks “snipped”
-    parch.style.paddingBottom = '18px'
 
-    // compact header and steps
-    steps.style.gridTemplateColumns = 'repeat(3, 1fr)'
-    nameEl.style.fontSize = '28px'
+    // compact top row (always 3-across for PDF)
+    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    // smaller cards and name to guarantee one page
+    if (nameRef.current) nameRef.current.style.fontSize = '28px'
+    const thumbCards = root.querySelectorAll('[data-thumb="1"]')
+    const prevCardHeights = []
+    thumbCards.forEach(card => {
+      prevCardHeights.push(card.style.minHeight)
+      card.style.minHeight = '210px'
+    })
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    // *** Finished Look: make card mirror image orientation & center it ***
-    // 1) Make wrapper center children
-    finWrap.style.textAlign = 'center'
-    // 2) Let the card shrink to its content (the image)
-    finCard.style.display = 'inline-block'
-    finCard.style.width = 'auto'
-    // 3) Prevent any stretching of the image; constrain by height only
-    finImg.style.width = 'auto'
-    finImg.style.height = 'auto'
-    finImg.style.maxHeight = '460px'
-
-    // embed images for crisp canvas
+    // embed images for crisp canvas (and prevent any forced distortion)
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try { img.src = await toDataURL(img.src) } catch {}
+        // distortion guards
+        img.removeAttribute('width')
+        img.removeAttribute('height')
+        img.style.height = 'auto'
       })
     )
 
@@ -183,21 +165,13 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore DOM styles
+    // restore page styles
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    steps.style.gridTemplateColumns = prevStepsCols
-    nameEl.style.fontSize = prevNameSize
-    parch.style.paddingBottom = prevParchPadB
-
-    finWrap.style.textAlign = prevFWTextAlign
-    finCard.style.display = prevCardDisplay
-    finCard.style.width = prevCardWidth
-    finImg.style.width = prevImgWidth
-    finImg.style.height = prevImgHeight
-    finImg.style.maxHeight = prevImgMaxH
-
-    originals.forEach(([img, src]) => (img.src = src))
+    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
+    if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
+    thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
   }
 
   if (loading) {
@@ -224,7 +198,7 @@ export default function PortfolioPage() {
       <div ref={rootRef} style={container}>
         <div ref={hatchRef} style={hatchWrap}>
           <div style={sheet}>
-            <div ref={parchmentRef} style={parchment} data-parchment="1">
+            <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
               <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
                 <img
@@ -257,9 +231,9 @@ export default function PortfolioPage() {
               </div>
 
               {/* Finished look */}
-              <div ref={finishedWrapRef} style={finishedWrap}>
+              <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
-                <div ref={finishedCardRef} style={finishedCard}>
+                <div style={finishedCard}>
                   {images[4]
                     ? <img
                         ref={finishedImgRef}
@@ -370,8 +344,7 @@ const thumbImg = {
   opacity: 0.92
 }
 
-/* Finished Look */
-const finishedWrap = { marginTop: 16 } // we center this (textAlign) only during PDF export
+const finishedWrap = { marginTop: 16 }
 const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
 const finishedCard = {
   background: '#fff',
@@ -381,7 +354,7 @@ const finishedCard = {
   padding: 12
 }
 const finishedImg = {
-  width: '100%',      // page view fills card width; for PDF we override to 'auto'
+  width: '100%',
   height: 'auto',
   maxHeight: 680,
   objectFit: 'contain',
@@ -424,7 +397,7 @@ const editBar = {
 const field = {
   background: '#161616',
   color: '#fff',
-  border: '1px solid '#333',
+  border: '1px solid #333', // fixed quoting
   borderRadius: 8,
   padding: '10px 12px',
   minWidth: 160
