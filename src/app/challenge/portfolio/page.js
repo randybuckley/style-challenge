@@ -14,20 +14,23 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
 
+  // orientation map: {1:'portrait'|'landscape'|'square', 2:..., 3:..., 4:...}
+  const [orient, setOrient] = useState({})
+
   const router = useRouter()
 
-  // ── Refs ─────────────────────────────────────────────────────────────────────
-  const rootRef = useRef(null)           // whole export root
-  const hatchRef = useRef(null)          // cross-hatch frame
-  const stepsRef = useRef(null)          // steps grid container
-  const nameRef = useRef(null)           // name H2
-  const finishedImgRef = useRef(null)    // Finished Look <img>
-  const finishedCardRef = useRef(null)   // Finished Look card (white rounded box)
+  // Refs for export-time tweaks
+  const rootRef = useRef(null)       // whole export root
+  const hatchRef = useRef(null)      // cross-hatch frame
+  const stepsRef = useRef(null)      // steps grid container
+  const nameRef = useRef(null)       // name H2
+  const parchmentRef = useRef(null)  // parchment center
 
-  // ── Load/profile ────────────────────────────────────────────────────────────
   useEffect(() => {
-    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq(); window.addEventListener('resize', mq)
+    const mq = () =>
+      setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
+    mq()
+    window.addEventListener('resize', mq)
     return () => window.removeEventListener('resize', mq)
   }, [])
 
@@ -83,10 +86,35 @@ export default function PortfolioPage() {
         second_name: (secondName || '').trim() || null,
         salon_name: (salonName || '').trim() || null
       })
-    } finally { setSaving(false) }
+    } finally {
+      setSaving(false)
+    }
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // --- helpers ---------------------------------------------------------------
+
+  // determine orientation from intrinsic size
+  const orientationOf = (img) => {
+    const w = img.naturalWidth || 0
+    const h = img.naturalHeight || 0
+    if (!w || !h) return 'square'
+    const r = w / h
+    if (r > 1.1) return 'landscape'
+    if (r < 0.9) return 'portrait'
+    return 'square'
+  }
+
+  // ratio string "w/h" for a given orientation
+  const ratioFor = (o) =>
+    o === 'portrait' ? '3/4' : o === 'landscape' ? '4/3' : '1/1'
+
+  // apply orientation when each <img> loads
+  const onImgLoad = (n) => (e) => {
+    const o = orientationOf(e.currentTarget)
+    setOrient((m) => (m[n] === o ? m : { ...m, [n]: o }))
+  }
+
+  // embed an image for crisp PDF
   const toDataURL = (url) =>
     new Promise((resolve, reject) => {
       const img = new Image()
@@ -102,98 +130,75 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ── PDF export (no grey band + never-stretched Finished Look) ───────────────
+  // lock aspect-ratio boxes to explicit pixel heights for html2canvas
+  const lockAspectHeights = (root) => {
+    const nodes = root.querySelectorAll('[data-ar]')
+    const prev = []
+    nodes.forEach((el) => {
+      const ratio = el.getAttribute('data-ar') // e.g., "4/3"
+      const [rw, rh] = ratio.split('/').map(Number)
+      const rect = el.getBoundingClientRect()
+      prev.push([el, el.style.height])
+      el.style.height = `${(rect.width * rh) / rw}px`
+    })
+    return () => {
+      prev.forEach(([el, h]) => (el.style.height = h || ''))
+    }
+  }
+
+  // --- PDF export ------------------------------------------------------------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
-    const parchmentEl = root?.querySelector('[data-parchment="1"]')
-    if (!root || !hatch || !parchmentEl) return
+    const parchment = parchmentRef.current
+    if (!root || !hatch || !parchment) return
 
-    // Letter @ ~96dpi
+    // US Letter @ ~96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
-    // Snapshot existing styles to restore later
+    // snapshot styles we will touch
     const prevRoot = root.getAttribute('style') || ''
     const prevHatch = hatch.getAttribute('style') || ''
-    const prevParchPad = parchmentEl.style.paddingBottom || ''
+    const prevParch = parchment.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
 
-    const finishedImg = finishedImgRef.current
-    const finishedCard = finishedCardRef.current
-    const prevCardStyle = {
-      position: finishedCard?.style.position || '',
-      height: finishedCard?.style.height || '',
-      overflow: finishedCard?.style.overflow || '',
-      display: finishedCard?.style.display || '',
-    }
-    const prevImgStyle = finishedImg ? {
-      position: finishedImg.style.position || '',
-      top: finishedImg.style.top || '',
-      left: finishedImg.style.left || '',
-      transform: finishedImg.style.transform || '',
-      maxWidth: finishedImg.style.maxWidth || '',
-      maxHeight: finishedImg.style.maxHeight || '',
-      width: finishedImg.style.width || '',
-      height: finishedImg.style.height || '',
-    } : {}
-
-    // 1) Full-bleed cross-hatch; no grey band
+    // force single page, full-bleed cross-hatch; parchment fills bottom
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
-    hatch.style.padding = '0'               // push parchment to the very edge
+
+    hatch.style.padding = '0'
     hatch.style.borderRadius = '0'
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
-    // ensure we see parchment (not cross-hatch) at the very bottom
-    parchmentEl.style.paddingBottom = '28px'
 
-    // 2) Compact top row to keep everything on one page
+    parchment.style.minHeight = `${PDF_H}px`
+    parchment.style.padding = '16px 16px 22px' // ensure a small parchment sliver below
+
+    // compact top row and name for one-page guarantee
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
-    const thumbCards = root.querySelectorAll('[data-thumb="1"]')
-    const prevCardHeights = []
-    thumbCards.forEach(card => { prevCardHeights.push(card.style.minHeight); card.style.minHeight = '210px' })
 
-    // 3) Finished Look: letterbox inside the white rounded card (no stretching)
-    if (finishedImg && finishedCard) {
-      // detect orientation safely
-      let natW = finishedImg.naturalWidth, natH = finishedImg.naturalHeight
-      if (!natW || !natH) {
-        const probe = new Image()
-        probe.src = finishedImg.src
-        await new Promise(res => { probe.onload = res; probe.onerror = res })
-        natW = probe.naturalWidth || 1
-        natH = probe.naturalHeight || 1
-      }
-      const isPortrait = natH >= natW
+    // lock AR boxes to explicit heights so html2canvas measures correctly
+    const unlockAR = lockAspectHeights(root)
 
-      // give the card a fixed box; image will be absolutely centered
-      finishedCard.style.position = 'relative'
-      finishedCard.style.display  = 'block'
-      finishedCard.style.overflow = 'hidden'
-      finishedCard.style.height   = isPortrait ? '540px' : '420px'
-
-      finishedImg.style.position  = 'absolute'
-      finishedImg.style.top       = '50%'
-      finishedImg.style.left      = '50%'
-      finishedImg.style.transform = 'translate(-50%, -50%)'
-      finishedImg.style.maxWidth  = '100%'
-      finishedImg.style.maxHeight = '100%'
-      finishedImg.style.width     = 'auto'
-      finishedImg.style.height    = 'auto'
-    }
-
-    // 4) Embed images for crisp PDF
+    // embed images to data URLs and prevent any intrinsic width/height stretching
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
-        originals.push([img, img.src])
-        try { img.src = await toDataURL(img.src) } catch {}
+        originals.push([img, img.src, img.getAttribute('style') || ''])
+        try {
+          img.src = await toDataURL(img.src)
+        } catch {}
+        img.removeAttribute('width')
+        img.removeAttribute('height')
+        img.style.width = '100%'
+        img.style.height = '100%'
+        img.style.objectFit = 'contain'
       })
     )
 
@@ -208,33 +213,22 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // Restore everything
+    // restore everything
+    originals.forEach(([img, src, st]) => {
+      img.src = src
+      if (st) img.setAttribute('style', st)
+      else img.removeAttribute('style')
+    })
+    unlockAR()
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    parchmentEl.style.paddingBottom = prevParchPad
+    parchment.setAttribute('style', prevParch)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
-    thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
-    if (finishedCard) {
-      finishedCard.style.position = prevCardStyle.position
-      finishedCard.style.height   = prevCardStyle.height
-      finishedCard.style.overflow = prevCardStyle.overflow
-      finishedCard.style.display  = prevCardStyle.display
-    }
-    if (finishedImg) {
-      finishedImg.style.position  = prevImgStyle.position
-      finishedImg.style.top       = prevImgStyle.top
-      finishedImg.style.left      = prevImgStyle.left
-      finishedImg.style.transform = prevImgStyle.transform
-      finishedImg.style.maxWidth  = prevImgStyle.maxWidth
-      finishedImg.style.maxHeight = prevImgStyle.maxHeight
-      finishedImg.style.width     = prevImgStyle.width
-      finishedImg.style.height    = prevImgStyle.height
-    }
-    originals.forEach(([img, src]) => (img.src = src))
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────────────
+  // --- render ----------------------------------------------------------------
+
   if (loading) {
     return (
       <main style={pageShell}>
@@ -244,6 +238,19 @@ export default function PortfolioPage() {
   }
 
   const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
+
+  // helper to build a plate with orientation-aware aspect ratio
+  const plateStyle = (n) => {
+    const o = orient[n] || 'square'
+    const ratio = ratioFor(o) // "4/3" | "3/4" | "1/1"
+    return { ...thumbCard, aspectRatio: ratio }
+  }
+
+  const finishedPlateStyle = () => {
+    const o = orient[4] || 'landscape'
+    const ratio = ratioFor(o)
+    return { ...finishedCard, aspectRatio: ratio, background: 'rgba(255,255,255,0.60)', border: '1px solid rgba(255,255,255,0.82)' }
+  }
 
   return (
     <main style={pageShell}>
@@ -259,7 +266,7 @@ export default function PortfolioPage() {
       <div ref={rootRef} style={container}>
         <div ref={hatchRef} style={hatchWrap}>
           <div style={sheet}>
-            <div style={parchment} data-parchment="1">
+            <div ref={parchmentRef} style={parchment}>
               {/* translucent rounded logo */}
               <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
                 <img
@@ -282,10 +289,20 @@ export default function PortfolioPage() {
                 style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
               >
                 {[1,2,3].map(n=>(
-                  <div key={n} data-thumb="1" style={thumbCard}>
+                  <div key={n} style={plateStyle(n)} data-ar={ratioFor(orient[n] || 'square')}>
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n]
-                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
+                      ? (
+                        <div style={imgWrap}>
+                          <img
+                            src={images[n]}
+                            alt={`Step ${n}`}
+                            data-embed="true"
+                            onLoad={onImgLoad(n)}
+                            style={imgFit}
+                          />
+                        </div>
+                        )
                       : <div style={missing}>No image</div>}
                   </div>
                 ))}
@@ -294,15 +311,19 @@ export default function PortfolioPage() {
               {/* Finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
-                <div ref={finishedCardRef} style={finishedCard}>
+                <div style={finishedPlateStyle()} data-ar={ratioFor(orient[4] || 'landscape')}>
                   {images[4]
-                    ? <img
-                        ref={finishedImgRef}
-                        src={images[4]}
-                        alt="Finished Look"
-                        data-embed="true"
-                        style={finishedImg}
-                      />
+                    ? (
+                      <div style={imgWrap}>
+                        <img
+                          src={images[4]}
+                          alt="Finished Look"
+                          data-embed="true"
+                          onLoad={onImgLoad(4)}
+                          style={imgFit}
+                        />
+                      </div>
+                      )
                     : <div style={missing}>No final image</div>}
                 </div>
               </div>
@@ -322,7 +343,7 @@ export default function PortfolioPage() {
   )
 }
 
-/* ===================== styles (unchanged for the live page) ================== */
+/* ===================== styles ===================== */
 
 const pageShell = {
   minHeight: '100vh',
@@ -362,7 +383,8 @@ const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
   padding: '16px 16px 36px',
-  color: '#111'
+  color: '#111',
+  boxSizing: 'border-box'
 }
 
 /* Name line */
@@ -382,7 +404,7 @@ const stepsGrid = {
   marginTop: 6
 }
 
-/* translucent “plates” like the logo */
+/* translucent plate */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
@@ -392,37 +414,34 @@ const thumbCard = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  minHeight: 260
+  gap: 8,
+  // height is driven by aspectRatio; we keep it unset here
 }
-const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBottom: 8 }
-const thumbImg = {
+
+const thumbLabel = { fontWeight: 700, fontSize: 13, color: '#5b5b5b' }
+
+/* wrapper ensures the image always fills the plate while keeping aspect via contain */
+const imgWrap = {
   width: '100%',
-  aspectRatio: '1 / 1',
-  objectFit: 'cover',
+  height: '100%',
   borderRadius: 12,
   background: '#fff',
-  display: 'block',
-  opacity: 0.92
+  overflow: 'hidden'
+}
+
+const imgFit = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain',
+  display: 'block'
 }
 
 const finishedWrap = { marginTop: 16 }
 const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
 const finishedCard = {
-  background: 'rgba(255,255,255,0.60)',        // match opacity of step cards
-  border: '1px solid rgba(255,255,255,0.82)',
   borderRadius: 16,
-  boxShadow: '0 8px 22px rgba(0,0,0,.12)',
-  padding: 12
-}
-const finishedImg = {
-  width: '100%',
-  height: 'auto',       // page view stays as before; export overrides for letterbox
-  maxHeight: 680,
-  objectFit: 'contain',
-  borderRadius: 12,
-  background: '#fff',
-  display: 'block',
-  opacity: 0.92
+  padding: 12,
+  boxShadow: '0 8px 22px rgba(0,0,0,.08)'
 }
 
 const missing = { color: '#888', fontStyle: 'italic', marginTop: 18 }
