@@ -16,17 +16,19 @@ export default function PortfolioPage() {
 
   const router = useRouter()
 
-  // Refs for export-time tweaks
-  const rootRef = useRef(null)       // whole export root
-  const hatchRef = useRef(null)      // cross-hatch frame
-  const stepsRef = useRef(null)      // steps grid container
-  const nameRef = useRef(null)       // name H2
+  // Refs (used for PDF export-time tweaks)
+  const rootRef = useRef(null)
+  const hatchRef = useRef(null)
+  const stepsRef = useRef(null)
+  const nameRef = useRef(null)
   const finishedImgRef = useRef(null)
 
   // ---------- load/profile ----------
   useEffect(() => {
-    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq(); window.addEventListener('resize', mq)
+    const mq = () =>
+      setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
+    mq()
+    window.addEventListener('resize', mq)
     return () => window.removeEventListener('resize', mq)
   }, [])
 
@@ -34,7 +36,10 @@ export default function PortfolioPage() {
     const run = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
       const u = sessionData?.session?.user
-      if (!u) return router.push('/')
+      if (!u) {
+        router.push('/')
+        return
+      }
       setUser(u)
 
       const { data: profile } = await supabase
@@ -42,6 +47,7 @@ export default function PortfolioPage() {
         .select('first_name, second_name, salon_name')
         .eq('id', u.id)
         .single()
+
       if (profile) {
         setFirstName(profile.first_name || '')
         setSecondName(profile.second_name || '')
@@ -82,7 +88,9 @@ export default function PortfolioPage() {
         second_name: (secondName || '').trim() || null,
         salon_name: (salonName || '').trim() || null
       })
-    } finally { setSaving(false) }
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ---------- helpers ----------
@@ -101,14 +109,14 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export (force compact grid & heights, preserve Finished ratio) ----------
+  // ---------- PDF export (compact layout + crisp images) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
     if (!root || !hatch) return
 
-    // Letter @ 96dpi
+    // Letter @ ~96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
@@ -117,8 +125,9 @@ export default function PortfolioPage() {
     const prevHatch = hatch.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
+    const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
 
-    // force full-bleed frame
+    // full-bleed frame in export (no grey band)
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
@@ -127,62 +136,43 @@ export default function PortfolioPage() {
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    // compact top row (always 3-across for PDF) + smaller cards + name
+    // add extra parchment bottom so the page doesn’t look chopped
+    const parchmentEl = root.querySelector('[data-parchment="1"]')
+    const prevParchPad = parchmentEl?.style.paddingBottom || ''
+    if (parchmentEl) parchmentEl.style.paddingBottom = '54px'
+
+    // compact top row (always 3 across for PDF)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    // slightly smaller elements for guaranteed one-page fit
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
-    thumbCards.forEach(card => {
+    thumbCards.forEach((card) => {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
+    if (finishedImgRef.current) {
+      finishedImgRef.current.style.width = '100%'
+      finishedImgRef.current.style.height = 'auto'
+      finishedImgRef.current.style.maxHeight = '520px'
+      finishedImgRef.current.style.objectFit = 'contain'
+      finishedImgRef.current.style.aspectRatio = 'auto'
+    }
 
-    // embed images (better fidelity) & guard distortion
+    // embed images so html2canvas sees crisp pixels & no forced dimensions
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
-        try { img.src = await toDataURL(img.src) } catch {}
+        try {
+          img.src = await toDataURL(img.src)
+        } catch {}
         img.removeAttribute('width')
         img.removeAttribute('height')
         img.style.height = 'auto'
       })
     )
-
-    // --- PRESERVE FINISHED LOOK RATIO WITH A CANVAS DURING EXPORT ---
-    let restoreFinished = () => {}
-    if (finishedImgRef.current && finishedImgRef.current.complete) {
-      const finImg = finishedImgRef.current
-      const parent = finImg.parentElement // the white rounded card
-      const naturalW = finImg.naturalWidth || finImg.width
-      const naturalH = finImg.naturalHeight || finImg.height
-      if (parent && naturalW && naturalH) {
-        const targetW = parent.clientWidth
-        const ratio = naturalH / naturalW
-        const targetH = Math.min(460, Math.round(targetW * ratio))
-
-        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1))
-        const canvas = document.createElement('canvas')
-        canvas.width = targetW * dpr
-        canvas.height = targetH * dpr
-        canvas.style.width = `${targetW}px`
-        canvas.style.height = `${targetH}px`
-        canvas.style.display = 'block'
-        canvas.style.borderRadius = getComputedStyle(finImg).borderRadius
-        const ctx = canvas.getContext('2d')
-        ctx.scale(dpr, dpr)
-
-        const tmp = new Image()
-        tmp.crossOrigin = 'anonymous'
-        tmp.onload = () => { ctx.drawImage(tmp, 0, 0, targetW, targetH) }
-        tmp.src = finImg.src
-
-        parent.insertBefore(canvas, finImg)
-        finImg.style.display = 'none'
-        restoreFinished = () => { canvas.remove(); finImg.style.display = '' }
-      }
-    }
 
     await html2pdf()
       .from(root)
@@ -195,13 +185,14 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore DOM
-    restoreFinished()
+    // restore page styles
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
+    if (parchmentEl) parchmentEl.style.paddingBottom = prevParchPad
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
   }
 
   if (loading) {
@@ -218,10 +209,27 @@ export default function PortfolioPage() {
     <main style={pageShell}>
       {/* editable identity bar */}
       <div style={editBar}>
-        <input value={firstName} onChange={(e)=>setFirstName(e.target.value)} placeholder="First Name" style={field}/>
-        <input value={secondName} onChange={(e)=>setSecondName(e.target.value)} placeholder="Last Name" style={field}/>
-        <input value={salonName} onChange={(e)=>setSalonName(e.target.value)} placeholder="Salon" style={{...field,minWidth:220}}/>
-        <button onClick={saveProfile} disabled={saving} style={btnSmall}>{saving?'Saving…':'Save'}</button>
+        <input
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="First Name"
+          style={field}
+        />
+        <input
+          value={secondName}
+          onChange={(e) => setSecondName(e.target.value)}
+          placeholder="Last Name"
+          style={field}
+        />
+        <input
+          value={salonName}
+          onChange={(e) => setSalonName(e.target.value)}
+          placeholder="Salon"
+          style={{ ...field, minWidth: 220 }}
+        />
+        <button onClick={saveProfile} disabled={saving} style={btnSmall}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
       </div>
 
       {/* export root */}
@@ -230,32 +238,50 @@ export default function PortfolioPage() {
           <div style={sheet}>
             <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
-              <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
+              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
                 <img
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
-                  style={{ width:220, height:'auto', display:'inline-block', opacity:.6, borderRadius:16 }}
+                  style={{
+                    width: 220,
+                    height: 'auto',
+                    display: 'inline-block',
+                    opacity: 0.6,
+                    borderRadius: 16
+                  }}
                 />
               </div>
 
               {/* prominent name line */}
               <h2 ref={nameRef} style={stylistName}>
                 {nameLine}
-                {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
+                {salonName ? (
+                  <span style={{ fontWeight: 500 }}>{' — '}{salonName}</span>
+                ) : null}
               </h2>
 
-              {/* Steps */}
+              {/* Steps (stack on mobile; 3-across on desktop; PDF forces 3-across) */}
               <div
                 ref={stepsRef}
-                style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
+                style={{
+                  ...stepsGrid,
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
+                }}
               >
-                {[1,2,3].map(n=>(
+                {[1, 2, 3].map((n) => (
                   <div key={n} data-thumb="1" style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
-                    {images[n]
-                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
-                      : <div style={missing}>No image</div>}
+                    {images[n] ? (
+                      <img
+                        src={images[n]}
+                        alt={`Step ${n}`}
+                        data-embed="true"
+                        style={thumbImg}
+                      />
+                    ) : (
+                      <div style={missing}>No image</div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -264,15 +290,17 @@ export default function PortfolioPage() {
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
                 <div style={finishedCard}>
-                  {images[4]
-                    ? <img
-                        ref={finishedImgRef}
-                        src={images[4]}
-                        alt="Finished Look"
-                        data-embed="true"
-                        style={finishedImg}
-                      />
-                    : <div style={missing}>No final image</div>}
+                  {images[4] ? (
+                    <img
+                      ref={finishedImgRef}
+                      src={images[4]}
+                      alt="Finished Look"
+                      data-embed="true"
+                      style={finishedImg}
+                    />
+                  ) : (
+                    <div style={missing}>No final image</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -281,9 +309,14 @@ export default function PortfolioPage() {
       </div>
 
       {/* actions */}
-      <div style={{ marginTop: 18, textAlign:'center' }}>
-        <button onClick={downloadPDF} style={{ ...btn, marginRight:10 }}>📄 Download Portfolio</button>
-        <button onClick={()=>router.push('/challenge/submission/competition')} style={{ ...btn, background:'#28a745' }}>
+      <div style={{ marginTop: 18, textAlign: 'center' }}>
+        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
+          📄 Download Portfolio
+        </button>
+        <button
+          onClick={() => router.push('/challenge/submission/competition')}
+          style={{ ...btn, background: '#28a745' }}
+        >
           ✅ Become Certified
         </button>
       </div>
@@ -307,9 +340,9 @@ const pageShell = {
 
 const container = { width: 'min(800px, 95vw)' }
 
-/* Cross-hatch frame */
+/* Cross-hatch frame (trimmed bottom on live page) */
 const hatchWrap = {
-  padding: 22,
+  padding: '22px 22px 14px',
   borderRadius: 14,
   boxShadow: '0 18px 48px rgba(0,0,0,.35)',
   backgroundImage:
@@ -385,9 +418,10 @@ const finishedCard = {
 }
 const finishedImg = {
   width: '100%',
-  height: 'auto',     // keep intrinsic aspect ratio
+  height: 'auto',          // keep intrinsic aspect ratio
   maxHeight: 680,
-  objectFit: 'contain',
+  objectFit: 'contain',    // no crop/stretch
+  aspectRatio: 'auto',     // modern hint for correct ratio
   borderRadius: 12,
   background: '#fff',
   display: 'block',
