@@ -26,8 +26,7 @@ export default function PortfolioPage() {
   // ---------- load/profile ----------
   useEffect(() => {
     const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq()
-    window.addEventListener('resize', mq)
+    mq(); window.addEventListener('resize', mq)
     return () => window.removeEventListener('resize', mq)
   }, [])
 
@@ -43,7 +42,6 @@ export default function PortfolioPage() {
         .select('first_name, second_name, salon_name')
         .eq('id', u.id)
         .single()
-
       if (profile) {
         setFirstName(profile.first_name || '')
         setSecondName(profile.second_name || '')
@@ -84,9 +82,7 @@ export default function PortfolioPage() {
         second_name: (secondName || '').trim() || null,
         salon_name: (salonName || '').trim() || null
       })
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
   // ---------- helpers ----------
@@ -105,14 +101,14 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export (force compact grid & heights) ----------
+  // ---------- PDF export (force compact grid & heights, preserve Finished ratio) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
     if (!root || !hatch) return
 
-    // Letter @ ~96dpi
+    // Letter @ 96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
@@ -121,12 +117,6 @@ export default function PortfolioPage() {
     const prevHatch = hatch.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
-    const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
-
-    // parchment node (center area)
-    const parchmentEl = root.querySelector('[data-parchment="1"]')
-    const prevParchMinH = parchmentEl?.style.minHeight || ''
-    const prevParchPadB = parchmentEl?.style.paddingBottom || ''
 
     // force full-bleed frame
     root.style.width = `${PDF_W}px`
@@ -137,15 +127,8 @@ export default function PortfolioPage() {
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    // ensure parchment reaches the very bottom (no grey hatch band)
-    if (parchmentEl) {
-      parchmentEl.style.minHeight = `${PDF_H}px`
-      parchmentEl.style.paddingBottom = '64px' // more parchment at the bottom edge
-    }
-
-    // compact top row (always 3-across for PDF)
+    // compact top row (always 3-across for PDF) + smaller cards + name
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
-    // smaller name & step cards to guarantee one page
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
@@ -153,9 +136,8 @@ export default function PortfolioPage() {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
-    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    // embed images for crisp canvas; avoid any forced distortion
+    // embed images (better fidelity) & guard distortion
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
@@ -168,6 +150,40 @@ export default function PortfolioPage() {
       })
     )
 
+    // --- PRESERVE FINISHED LOOK RATIO WITH A CANVAS DURING EXPORT ---
+    let restoreFinished = () => {}
+    if (finishedImgRef.current && finishedImgRef.current.complete) {
+      const finImg = finishedImgRef.current
+      const parent = finImg.parentElement // the white rounded card
+      const naturalW = finImg.naturalWidth || finImg.width
+      const naturalH = finImg.naturalHeight || finImg.height
+      if (parent && naturalW && naturalH) {
+        const targetW = parent.clientWidth
+        const ratio = naturalH / naturalW
+        const targetH = Math.min(460, Math.round(targetW * ratio))
+
+        const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1))
+        const canvas = document.createElement('canvas')
+        canvas.width = targetW * dpr
+        canvas.height = targetH * dpr
+        canvas.style.width = `${targetW}px`
+        canvas.style.height = `${targetH}px`
+        canvas.style.display = 'block'
+        canvas.style.borderRadius = getComputedStyle(finImg).borderRadius
+        const ctx = canvas.getContext('2d')
+        ctx.scale(dpr, dpr)
+
+        const tmp = new Image()
+        tmp.crossOrigin = 'anonymous'
+        tmp.onload = () => { ctx.drawImage(tmp, 0, 0, targetW, targetH) }
+        tmp.src = finImg.src
+
+        parent.insertBefore(canvas, finImg)
+        finImg.style.display = 'none'
+        restoreFinished = () => { canvas.remove(); finImg.style.display = '' }
+      }
+    }
+
     await html2pdf()
       .from(root)
       .set({
@@ -179,17 +195,13 @@ export default function PortfolioPage() {
       })
       .save()
 
-    // restore page styles
+    // restore DOM
+    restoreFinished()
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    if (parchmentEl) {
-      parchmentEl.style.minHeight = prevParchMinH
-      parchmentEl.style.paddingBottom = prevParchPadB
-    }
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
-    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
   }
 
   if (loading) {
@@ -201,7 +213,6 @@ export default function PortfolioPage() {
   }
 
   const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
-  const finishedMax = isMobile ? 520 : 680 // prevent mobile stretching
 
   return (
     <main style={pageShell}>
@@ -259,7 +270,7 @@ export default function PortfolioPage() {
                         src={images[4]}
                         alt="Finished Look"
                         data-embed="true"
-                        style={{ ...finishedImg, maxHeight: finishedMax }}
+                        style={finishedImg}
                       />
                     : <div style={missing}>No final image</div>}
                 </div>
