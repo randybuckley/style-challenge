@@ -13,7 +13,6 @@ export default function PortfolioPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
-  const [isLandscapePhone, setIsLandscapePhone] = useState(false)
 
   const router = useRouter()
 
@@ -23,19 +22,12 @@ export default function PortfolioPage() {
   const stepsRef = useRef(null)      // steps grid container
   const nameRef = useRef(null)       // name H2
   const finishedImgRef = useRef(null)
-  const parchmentRef = useRef(null)  // parchment center (for bottom sliver control)
 
   // ---------- load/profile ----------
   useEffect(() => {
-    const onResize = () => {
-      const w = typeof window !== 'undefined' ? window.innerWidth : 0
-      const h = typeof window !== 'undefined' ? window.innerHeight : 0
-      setIsMobile(w < 560)
-      setIsLandscapePhone(w > h && w <= 900)
-    }
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
+    mq(); window.addEventListener('resize', mq)
+    return () => window.removeEventListener('resize', mq)
   }, [])
 
   useEffect(() => {
@@ -109,16 +101,14 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export (force compact grid & heights, fix bottom sliver + orientation) ----------
+  // ---------- PDF export (force compact grid & heights) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
-    const parchment = parchmentRef.current
-    const finishedImg = finishedImgRef.current
-    if (!root || !hatch || !parchment) return
+    if (!root || !hatch) return
 
-    // Letter @ ~96dpi
+    // Letter @ 96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
@@ -127,12 +117,7 @@ export default function PortfolioPage() {
     const prevHatch = hatch.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
-    const prevFinishedMaxH = finishedImg?.style.maxHeight || ''
-    const prevParchPad = parchment.style.paddingBottom || ''
-    const prevFIW = finishedImg?.style.width || ''
-    const prevFIH = finishedImg?.style.height || ''
-    const prevFIMaxH = finishedImg?.style.maxHeight || ''
-    const prevFIMargin = finishedImg?.style.margin || ''
+    const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
 
     // force full-bleed frame
     root.style.width = `${PDF_W}px`
@@ -142,9 +127,6 @@ export default function PortfolioPage() {
     hatch.style.borderRadius = '0'
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
-
-    // ensure there is only a *small* parchment sliver at the very bottom
-    parchment.style.paddingBottom = '14px'
 
     // compact top row (always 3-across for PDF)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
@@ -156,23 +138,7 @@ export default function PortfolioPage() {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
-
-    // finished image: respect orientation (avoid perceived “stretch”)
-    if (finishedImg && finishedImg.naturalWidth && finishedImg.naturalHeight) {
-      const isPortrait = finishedImg.naturalHeight >= finishedImg.naturalWidth
-      if (isPortrait) {
-        // portrait – limit height; let width auto to keep AR; center it
-        finishedImg.style.width = 'auto'
-        finishedImg.style.height = '520px'
-        finishedImg.style.maxHeight = '520px'
-        finishedImg.style.margin = '0 auto'
-      } else {
-        // landscape – use full width, natural height
-        finishedImg.style.width = '100%'
-        finishedImg.style.height = 'auto'
-        finishedImg.style.maxHeight = '460px'
-      }
-    }
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
     // embed images for crisp canvas (and prevent any forced distortion)
     const imgs = root.querySelectorAll('img[data-embed="true"]')
@@ -181,9 +147,10 @@ export default function PortfolioPage() {
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try { img.src = await toDataURL(img.src) } catch {}
+        // distortion guards
         img.removeAttribute('width')
         img.removeAttribute('height')
-        img.style.height = img.style.height || 'auto'
+        img.style.height = 'auto'
       })
     )
 
@@ -204,13 +171,7 @@ export default function PortfolioPage() {
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
-    if (finishedImg) {
-      finishedImg.style.width = prevFIW
-      finishedImg.style.height = prevFIH
-      finishedImg.style.maxHeight = prevFIMaxH
-      finishedImg.style.margin = prevFIMargin
-    }
-    parchment.style.paddingBottom = prevParchPad
+    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
   }
 
   if (loading) {
@@ -237,7 +198,7 @@ export default function PortfolioPage() {
       <div ref={rootRef} style={container}>
         <div ref={hatchRef} style={hatchWrap}>
           <div style={sheet}>
-            <div ref={parchmentRef} style={parchment} data-parchment="1">
+            <div style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
               <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
                 <img
@@ -260,21 +221,10 @@ export default function PortfolioPage() {
                 style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
               >
                 {[1,2,3].map(n=>(
-                  <div
-                    key={n}
-                    data-thumb="1"
-                    style={isLandscapePhone ? { ...thumbCard, ...thumbCardLandscape } : thumbCard}
-                  >
+                  <div key={n} data-thumb="1" style={thumbCard}>
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n]
-                      ? (
-                        <img
-                          src={images[n]}
-                          alt={`Step ${n}`}
-                          data-embed="true"
-                          style={isLandscapePhone ? { ...thumbImg, ...thumbImgLandscape } : thumbImg}
-                        />
-                      )
+                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
                       : <div style={missing}>No image</div>}
                   </div>
                 ))}
@@ -394,19 +344,6 @@ const thumbImg = {
   opacity: 0.92
 }
 
-/* Landscape-phone overrides: card hugs image & keeps natural AR */
-const thumbCardLandscape = {
-  minHeight: 'auto',
-  padding: 10,
-  alignItems: 'stretch'
-}
-const thumbImgLandscape = {
-  aspectRatio: 'auto',
-  width: '100%',
-  height: 'auto',
-  objectFit: 'contain'
-}
-
 const finishedWrap = { marginTop: 16 }
 const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
 const finishedCard = {
@@ -418,7 +355,7 @@ const finishedCard = {
 }
 const finishedImg = {
   width: '100%',
-  height: 'auto',
+  height: 'auto',     // keep intrinsic aspect ratio
   maxHeight: 680,
   objectFit: 'contain',
   borderRadius: 12,
@@ -460,7 +397,7 @@ const editBar = {
 const field = {
   background: '#161616',
   color: '#fff',
-  border: '1px solid '#333',
+  border: '1px solid #333', // ✅ fixed stray quote
   borderRadius: 8,
   padding: '10px 12px',
   minWidth: 160
