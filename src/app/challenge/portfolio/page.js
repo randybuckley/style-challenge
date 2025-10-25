@@ -13,25 +13,29 @@ export default function PortfolioPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
-
-  // NEW: finished image orientation flag
-  const [finishedPortrait, setFinishedPortrait] = useState(false)
+  const [isLandscapePhone, setIsLandscapePhone] = useState(false)
 
   const router = useRouter()
 
   // Refs for export-time tweaks
-  const rootRef = useRef(null)
-  const hatchRef = useRef(null)
-  const stepsRef = useRef(null)
-  const nameRef = useRef(null)
+  const rootRef = useRef(null)       // whole export root
+  const hatchRef = useRef(null)      // cross-hatch frame
+  const stepsRef = useRef(null)      // steps grid container
+  const nameRef = useRef(null)       // name H2
   const finishedImgRef = useRef(null)
-  const finishedCardRef = useRef(null) // NEW
 
   // ---------- load/profile ----------
   useEffect(() => {
-    const mq = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 560)
-    mq(); window.addEventListener('resize', mq)
-    return () => window.removeEventListener('resize', mq)
+    const onResize = () => {
+      const w = typeof window !== 'undefined' ? window.innerWidth : 0
+      const h = typeof window !== 'undefined' ? window.innerHeight : 0
+      setIsMobile(w < 560)
+      // treat “phone in landscape” as wide-but-short (prevents tall minHeights)
+      setIsLandscapePhone(w > h && w <= 900)
+    }
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   useEffect(() => {
@@ -75,17 +79,6 @@ export default function PortfolioPage() {
     run()
   }, [router])
 
-  // Detect finished image orientation whenever it changes
-  useEffect(() => {
-    const url = images[4]
-    if (!url) { setFinishedPortrait(false); return }
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => setFinishedPortrait(img.naturalHeight > img.naturalWidth)
-    img.onerror = () => setFinishedPortrait(false)
-    img.src = url
-  }, [images[4]])
-
   const saveProfile = async () => {
     if (!user) return
     setSaving(true)
@@ -116,14 +109,14 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export ----------
+  // ---------- PDF export (force compact grid & heights) ----------
   const downloadPDF = async () => {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
     if (!root || !hatch) return
 
-    // Letter @ 96dpi
+    // Letter @ ~96dpi
     const PDF_W = 816
     const PDF_H = 1056
 
@@ -133,10 +126,8 @@ export default function PortfolioPage() {
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
     const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
-    const prevFinishedCardWidth = finishedCardRef.current?.style.width || ''
-    const prevFinishedCardMargin = finishedCardRef.current?.style.margin || ''
 
-    // full-bleed frame
+    // force full-bleed frame
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
     root.style.margin = '0 auto'
@@ -145,8 +136,9 @@ export default function PortfolioPage() {
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    // compact layout
+    // compact top row (always 3-across for PDF)
     if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    // smaller cards and name to guarantee one page
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
@@ -156,25 +148,17 @@ export default function PortfolioPage() {
     })
     if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    // mirror finished plate orientation in PDF too
-    if (finishedCardRef.current) {
-      if (finishedPortrait) {
-        finishedCardRef.current.style.width = '66%'
-        finishedCardRef.current.style.margin = '0 auto'
-      } else {
-        finishedCardRef.current.style.width = '100%'
-        finishedCardRef.current.style.margin = ''
-      }
-    }
-
-    // embed images for crisp canvas (and prevent distortion)
+    // embed images for crisp canvas (and prevent any forced distortion)
     const imgs = root.querySelectorAll('img[data-embed="true"]')
     const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         originals.push([img, img.src])
         try { img.src = await toDataURL(img.src) } catch {}
-        img.removeAttribute('width'); img.removeAttribute('height'); img.style.height = 'auto'
+        // distortion guards
+        img.removeAttribute('width')
+        img.removeAttribute('height')
+        img.style.height = 'auto'
       })
     )
 
@@ -196,10 +180,6 @@ export default function PortfolioPage() {
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
     thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
     if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
-    if (finishedCardRef.current) {
-      finishedCardRef.current.style.width = prevFinishedCardWidth
-      finishedCardRef.current.style.margin = prevFinishedCardMargin
-    }
   }
 
   if (loading) {
@@ -249,10 +229,21 @@ export default function PortfolioPage() {
                 style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
               >
                 {[1,2,3].map(n=>(
-                  <div key={n} data-thumb="1" style={thumbCard}>
+                  <div
+                    key={n}
+                    data-thumb="1"
+                    style={isLandscapePhone ? { ...thumbCard, ...thumbCardLandscape } : thumbCard}
+                  >
                     <div style={thumbLabel}>Step {n}</div>
                     {images[n]
-                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
+                      ? (
+                        <img
+                          src={images[n]}
+                          alt={`Step ${n}`}
+                          data-embed="true"
+                          style={isLandscapePhone ? { ...thumbImg, ...thumbImgLandscape } : thumbImg}
+                        />
+                      )
                       : <div style={missing}>No image</div>}
                   </div>
                 ))}
@@ -261,17 +252,7 @@ export default function PortfolioPage() {
               {/* Finished look */}
               <div style={finishedWrap}>
                 <div style={finishedLabel}>Finished Look — Challenge Number One</div>
-
-                {/* Plate mirrors orientation + matches opacity of step cards */}
-                <div
-                  ref={finishedCardRef}
-                  style={{
-                    ...finishedCardBase,
-                    ...(finishedPortrait
-                      ? { width: '66%', margin: '0 auto' } // portrait: narrower plate
-                      : { width: '100%' })                 // landscape: full width
-                  }}
-                >
+                <div style={finishedCard}>
                   {images[4]
                     ? <img
                         ref={finishedImgRef}
@@ -360,12 +341,9 @@ const stepsGrid = {
 }
 
 /* translucent “plates” like the logo */
-const plateBg = 'rgba(255,255,255,0.60)'
-const plateBorder = '1px solid rgba(255,255,255,0.82)'
-
 const thumbCard = {
-  background: plateBg,
-  border: plateBorder,
+  background: 'rgba(255,255,255,0.60)',
+  border: '1px solid rgba(255,255,255,0.82)',
   borderRadius: 16,
   padding: 12,
   boxShadow: '0 6px 18px rgba(0,0,0,.12)',
@@ -375,6 +353,7 @@ const thumbCard = {
   minHeight: 260
 }
 const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBottom: 8 }
+
 const thumbImg = {
   width: '100%',
   aspectRatio: '1 / 1',
@@ -385,21 +364,31 @@ const thumbImg = {
   opacity: 0.92
 }
 
-const finishedWrap = { marginTop: 16 }
-const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
-
-/* NEW: finished card uses same opacity/plate styling as steps */
-const finishedCardBase = {
-  background: plateBg,
-  border: plateBorder,
-  borderRadius: 16,
-  boxShadow: '0 8px 22px rgba(0,0,0,.12)',
-  padding: 12
+/* Landscape-phone overrides: let the card hug the image and keep natural AR */
+const thumbCardLandscape = {
+  minHeight: 'auto',
+  padding: 10,
+  alignItems: 'stretch'
+}
+const thumbImgLandscape = {
+  aspectRatio: 'auto',
+  width: '100%',
+  height: 'auto',
+  objectFit: 'contain'
 }
 
+const finishedWrap = { marginTop: 16 }
+const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
+const finishedCard = {
+  background: '#fff',
+  border: '1px solid #e6e6e6',
+  borderRadius: 16,
+  boxShadow: '0 8px 22px rgba(0,0,0,.08)',
+  padding: 12
+}
 const finishedImg = {
   width: '100%',
-  height: 'auto',     // preserve aspect
+  height: 'auto',
   maxHeight: 680,
   objectFit: 'contain',
   borderRadius: 12,
