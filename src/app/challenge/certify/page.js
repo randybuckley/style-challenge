@@ -2,138 +2,78 @@
 
 import { useRouter } from 'next/navigation'
 
-export default function CertifyPage() {
+export default function CertifyIntroPage() {
   const router = useRouter()
 
   return (
-    <main style={pageShell}>
-      <div style={container}>
-        <div style={hatchWrap}>
-          <div style={sheet}>
-            <div style={parchment}>
-              {/* translucent rounded logo */}
-              <div style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}>
-                <img
-                  src="/logo.jpeg"
-                  alt="Patrick Cameron — Style Challenge"
-                  style={{ width: 220, height: 'auto', opacity: 0.6, borderRadius: 16 }}
-                />
-              </div>
-
-              <h2 style={title}>Final Step — Certification</h2>
-              <p style={lead}>
-                Watch this short message from Patrick, then choose how you’d like to proceed.
-              </p>
-
-              {/* video */}
-              <div style={videoCard}>
-                <video style={video} controls playsInline preload="metadata">
-                  {/* Replace with your real video path */}
-                  <source src="/certify.mp4" type="video/mp4" />
-                </video>
-              </div>
-
-              {/* actions */}
-              <div style={ctaRow}>
-                <button
-                  onClick={() => router.push('/challenge/portfolio')}
-                  style={{ ...btn, background: '#6c757d' }}
-                >
-                  ← Back to your Portfolio
-                </button>
-                <button
-                  onClick={() => router.push('/challenge/submission/portfolio')}
-                  style={{ ...btn, background: '#28a745' }}
-                >
-                  ✅ Have Patrick Check My Work
-                </button>
-              </div>
-            </div>
+    <main style={shell}>
+      <div style={card}>
+        <div style={{ textAlign: 'center', marginBottom: 12 }}>
+          {/* Placeholder video (swap src to your Vimeo when ready) */}
+          <div style={videoWrap}>
+            <iframe
+              src="https://player.vimeo.com/video/76979871"
+              title="Certification — Message from Patrick"
+              allow="autoplay; fullscreen; picture-in-picture"
+              style={video}
+            />
           </div>
+        </div>
+
+        <h1 style={h1}>Submit for Certification</h1>
+        <p style={p}>
+          You’ve finished the challenge. Patrick will personally review your work.
+          Choose an option below to continue.
+        </p>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', marginTop: 10 }}>
+          <button onClick={()=>router.push('/challenge/portfolio')} style={btnSecondary}>⬅ Back to your Portfolio</button>
+          <button onClick={()=>router.push('/challenge/certification')} style={btnPrimary}>✅ Have Patrick Check My Work</button>
         </div>
       </div>
     </main>
   )
 }
 
-/* -------- styles (mirror the certificate look) -------- */
-
-const pageShell = {
+/* styles */
+const shell = {
   minHeight: '100vh',
   background: '#000',
+  color: '#fff',
   display: 'flex',
+  alignItems: 'center',
   justifyContent: 'center',
-  alignItems: 'flex-start',
-  padding: '20px 12px',
-  boxSizing: 'border-box',
-  fontFamily:
-    'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+  padding: 20,
+  fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif'
 }
-
-const container = { width: 'min(800px, 95vw)' }
-
-const hatchWrap = {
-  padding: 22,
+const card = {
+  width: 'min(900px, 96vw)',
+  background: '#111',
+  border: '1px solid #333',
   borderRadius: 14,
-  boxShadow: '0 18px 48px rgba(0,0,0,.35)',
-  backgroundImage:
-    'repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, rgba(0,0,0,0) 2px 7px),' +
-    'repeating-linear-gradient(0deg, rgba(0,0,0,.045) 0 2px, rgba(0,0,0,0) 2px 7px)',
-  backgroundColor: '#eae7df'
-}
-
-const sheet = {
-  background: '#f2ebda',
-  borderRadius: 12,
-  boxShadow:
-    'inset 0 0 0 2px #cbbfa3, inset 0 0 0 10px #f2ebda, inset 0 0 0 12px #cbbfa3'
-}
-
-const parchment = {
-  background: 'url(/parchment.jpg) repeat, #f3ecdc',
-  borderRadius: 10,
   padding: 16,
-  color: '#111'
+  boxShadow: '0 18px 48px rgba(0,0,0,.35)'
 }
-
-const title = {
-  textAlign: 'center',
-  fontSize: 28,
-  fontWeight: 900,
-  margin: '8px 0 6px'
+const videoWrap = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 900,
+  aspectRatio: '16 / 9',
+  borderRadius: 12,
+  overflow: 'hidden',
+  border: '1px solid #333',
+  boxShadow: '0 8px 22px rgba(0,0,0,.35)'
 }
-
-const lead = {
-  textAlign: 'center',
-  margin: '0 0 12px',
-  color: '#444'
-}
-
-const videoCard = {
-  background: 'rgba(255,255,255,0.60)',
-  border: '1px solid rgba(255,255,255,0.82)',
-  borderRadius: 16,
-  boxShadow: '0 8px 22px rgba(0,0,0,.08)',
-  padding: 12
-}
-
 const video = {
   width: '100%',
-  height: 'auto',
-  borderRadius: 12,
-  display: 'block',
-  background: '#000'
+  height: '100%',
+  border: 0,
+  display: 'block'
 }
+const h1 = { fontSize: 24, margin: '12px 0 6px', textAlign: 'center', fontWeight: 800 }
+const p  = { margin: 0, textAlign: 'center', color: '#ccc' }
 
-const ctaRow = {
-  display: 'flex',
-  gap: 10,
-  justifyContent: 'center',
-  marginTop: 14,
-  flexWrap: 'wrap'
-}
-
-const btn = {
+const btnBase = {
   color: '#fff',
   border: 'none',
   borderRadius: 10,
@@ -142,3 +82,5 @@ const btn = {
   cursor: 'pointer',
   boxShadow: '0 10px 22px rgba(0,0,0,.25)'
 }
+const btnPrimary   = { ...btnBase, background: '#28a745' }
+const btnSecondary = { ...btnBase, background: '#444' }
