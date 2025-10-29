@@ -1,358 +1,152 @@
-// Route handler for certification review email + decision
-// NOTE: no 'use server' here.
+// src/app/api/review-certification/route.js
+import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import sgMail from '@sendgrid/mail'
+import crypto from 'crypto'
 
-import { supabaseAdmin } from '../../../lib/supabaseAdmin'
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY
 
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
+const DEFAULT_NOTIFY = 'info@accesslonghair.com'
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-function getBaseUrl () {
-  const envUrl =
-    process.env.SITE_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
-  return envUrl || 'http://localhost:3000'
-}
-
-// ── ENV VARS ───────────────────────────────────────────────────────────────────
-const SENDGRID_KEY = process.env.SENDGRID_API_KEY
-
-const FROM_EMAIL =
-  process.env.SENDER_EMAIL ||
-  process.env.MAIL_FROM_EMAIL ||
-  process.env.EMAIL_FROM ||
-  'info@accesslonghair.com'
-
-const FROM_NAME = process.env.MAIL_FROM_NAME || 'Patrick Cameron'
-
-const REVIEW_TO =
-  process.env.REVIEWER_EMAIL ||
-  process.env.REVIEW_TO ||
-  process.env.REVIEW_RECIPIENT ||
-  process.env.REVIEW_ADMIN_EMAIL
-
-async function sendEmail ({ to, subject, text, html }) {
-  if (!SENDGRID_KEY) throw new Error('Missing SENDGRID_API_KEY')
-  if (!FROM_EMAIL) throw new Error('Missing sender email')
-
-  const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${SENDGRID_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: FROM_EMAIL, name: FROM_NAME },
-      subject,
-      content: [
-        { type: 'text/plain', value: text || '' },
-        { type: 'text/html', value: html || '' }
-      ]
-    })
-  })
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`SendGrid error ${res.status}: ${body}`)
-  }
-}
-
-// ── Helpers to build rejection email text + routing ────────────────────────────
-function parseReason (reasonRaw = '') {
-  // supports both old and new keys
-  const r = (reasonRaw || '').toLowerCase()
-
-  // map older keys
-  if (r === 'quality') return { kind: 'photo_quality', step: 'any' }
-  if (r === 'step1') return { kind: 'needs_work', step: '1' }
-  if (r === 'step2') return { kind: 'needs_work', step: '2' }
-  if (r === 'step3') return { kind: 'needs_work', step: '3' }
-  if (r === 'finished') return { kind: 'needs_work', step: 'finished' }
-
-  // new keys you requested
-  if (r.startsWith('photo_quality_step')) {
-    const step = r.replace('photo_quality_step', '')
-    return { kind: 'photo_quality', step }
-  }
-  if (r === 'photo_quality_finished_look' || r === 'photo_quality_finished') {
-    return { kind: 'photo_quality', step: 'finished' }
-  }
-  if (r.startsWith('needs_work_step')) {
-    const step = r.replace('needs_work_step', '')
-    return { kind: 'needs_work', step }
-  }
-  if (r === 'needs_work_finished_look' || r === 'needs_work_finished') {
-    return { kind: 'needs_work', step: 'finished' }
-  }
-
-  // fallback
-  return { kind: 'generic', step: 'any' }
-}
-
-function stepPath (step) {
-  if (step === '1') return '/challenge/step1'
-  if (step === '2') return '/challenge/step2'
-  if (step === '3') return '/challenge/step3'
-  if (step === 'finished') return '/challenge/finished'
-  // generic quality issue -> send to step1 as the safe restart point
-  return '/challenge/step1'
-}
-
-function titleForStep (step) {
-  if (step === '1') return 'Step 1'
-  if (step === '2') return 'Step 2'
-  if (step === '3') return 'Step 3'
-  if (step === 'finished') return 'Finished Look'
-  return 'your photos'
-}
-
-function buildRejectionCopy ({ firstName, reason, comments }) {
-  const { kind, step } = parseReason(reason)
-  const stepTitle = titleForStep(step)
-  const link = stepPath(step)
-
-  const hi = firstName ? `Hi ${firstName},` : `Hi there,`
-
-  // friendly, encouraging copy
-  let bodyPlain = ''
-  let bodyHtml = ''
-
-  if (kind === 'photo_quality') {
-    bodyPlain =
-`${hi}
-
-Your work is very good—and part of learning is knowing when to refine it. Patrick had difficulty clearly seeing your work for ${stepTitle}. Could you take a clearer photo and resubmit?
-
-Tips:
-• Use good, even lighting
-• Fill the frame with the hair—avoid cluttered backgrounds
-• Hold the camera steady and focus on the key details
-
-${comments ? `Notes from Patrick:\n${comments}\n\n` : ''}When you’re ready, continue here: ${link}`
-    bodyHtml =
-`<p>${hi}</p>
-<p>Your work is very good—and part of learning is knowing when to refine it. Patrick had difficulty clearly seeing your work for <strong>${stepTitle}</strong>. Could you take a clearer photo and resubmit?</p>
-<ul>
-  <li>Use good, even lighting</li>
-  <li>Fill the frame with the hair — avoid cluttered backgrounds</li>
-  <li>Hold the camera steady and focus on the key details</li>
-</ul>
-${comments ? `<p><strong>Notes from Patrick:</strong><br/>${escapeHtml(comments)}</p>` : ''}
-<p>When you’re ready, continue here: <a href="${link}">${link}</a></p>`
-  } else if (kind === 'needs_work') {
-    bodyPlain =
-`${hi}
-
-Thank you for submitting your portfolio. Patrick thinks you're close, but ${stepTitle} needs a little more work. Please review Patrick’s video for ${stepTitle}, try again, and resubmit.
-
-${comments ? `Notes from Patrick:\n${comments}\n\n` : ''}Continue here: ${link}`
-    bodyHtml =
-`<p>${hi}</p>
-<p>Thank you for submitting your portfolio. Patrick thinks you're close, but <strong>${stepTitle}</strong> needs a little more work. Please review Patrick’s video for ${stepTitle}, try again, and resubmit.</p>
-${comments ? `<p><strong>Notes from Patrick:</strong><br/>${escapeHtml(comments)}</p>` : ''}
-<p>Continue here: <a href="${link}">${link}</a></p>`
-  } else {
-    bodyPlain =
-`${hi}
-
-Thank you for submitting your portfolio. Patrick would like a few improvements before awarding certification. Please review the videos, refine your images, and resubmit.
-
-${comments ? `Notes from Patrick:\n${comments}\n\n` : ''}Start here: ${stepPath('any')}`
-    bodyHtml =
-`<p>${hi}</p>
-<p>Thank you for submitting your portfolio. Patrick would like a few improvements before awarding certification. Please review the videos, refine your images, and resubmit.</p>
-${comments ? `<p><strong>Notes from Patrick:</strong><br/>${escapeHtml(comments)}</p>` : ''}
-<p>Start here: <a href="${stepPath('any')}">${stepPath('any')}</a></p>`
-  }
-
-  const subject = 'Certification Review — Please Try Again'
-  return { subject, text: bodyPlain, html: bodyHtml }
-}
-
-function buildApprovalCopy ({ firstName }) {
-  const hi = firstName ? `Hi ${firstName},` : `Hi there,`
-  const portfolio = '/challenge/portfolio'
-  const subject = 'Congratulations — You are Patrick Cameron Certified!'
-  const text =
-`${hi}
-
-Patrick is very proud of your work — you’re clearly demonstrating expertise in dressing long hair. Thank you for continuing your educational journey and striving to improve your craft.
-
-Download your Certified Portfolio here:
-${portfolio}`
-  const html =
-`<p>${hi}</p>
-<p>Patrick is very proud of your work — you’re clearly demonstrating expertise in dressing long hair. Thank you for continuing your educational journey and striving to improve your craft.</p>
-<p><a href="${portfolio}">Download your Certified Portfolio here</a>.</p>`
-  return { subject, text, html }
-}
-
-function escapeHtml (s = '') {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-}
-
-// ── EMAIL TO REVIEWER (triggered by certification page) ───────────────────────
-export async function PUT (req) {
+const errText = (e, fb = 'Unexpected server error') => {
   try {
-    const { token } = await req.json()
-    if (!token) return Response.json({ error: 'Missing token' }, { status: 400 })
-    if (!REVIEW_TO) return Response.json({ error: 'Missing reviewer email' }, { status: 500 })
+    if (!e) return fb
+    if (typeof e === 'string') return e
+    if (e.message) return e.message
+    if (e.error && typeof e.error === 'string') return e.error
+    if (e.error && e.error.message) return e.error.message
+    return JSON.stringify(e)
+  } catch { return fb }
+}
 
-    const { data: sub, error } = await supabaseAdmin
-      .from('submissions')
-      .select('id, user_id, email, first_name, second_name, salon_name, step1_url, step2_url, step3_url, finished_url, status')
-      .eq('review_token', token)
-      .single()
+/**
+ * Normalize any stored path/URL to a fetchable, public Supabase URL:
+ *  - https://.../render/image/public/uploads/... -> https://.../storage/v1/object/public/uploads/...
+ *  - Strip query strings
+ *  - Accepts:
+ *      * full storage URL
+ *      * full render URL
+ *      * "public/uploads/<uid>/file.jpg"
+ *      * "uploads/<uid>/file.jpg"
+ *      * "/uploads/<uid>/file.jpg"
+ *      * "<uid>/file.jpg"  (auto-prefix "uploads/")
+ */
+function toAbsolutePublic(input) {
+  try {
+    if (!input) return ''
+    let s = String(input).trim()
 
-    if (error || !sub) return Response.json({ error: 'Submission not found' }, { status: 404 })
+    // Full URL cases
+    if (/^https?:\/\//i.test(s)) {
+      s = s.replace('/render/image/public/', '/storage/v1/object/public/')
+      s = s.replace(/\?.*$/, '')
+      return s
+    }
 
-    const site = getBaseUrl()
-    // Approve should be one-click via API GET, Reject should open the review UI.
-    const approveLink = `${site}/api/review-certification?action=approve&token=${encodeURIComponent(token)}`
-    const rejectLink  = `${site}/review?token=${encodeURIComponent(token)}&action=reject`
-    const portfolioLink = `${site}/challenge/portfolio?user=${encodeURIComponent(sub.user_id)}`
+    // Relative/path cases
+    s = s.replace(/^\/+/, '')           // remove leading slash
+    if (s.startsWith('public/')) s = s.slice('public/'.length) // drop "public/" if present
+    if (!s.startsWith('uploads/')) s = `uploads/${s}`          // ensure bucket prefix
 
-    const subject = `New certification submission: ${[sub.first_name, sub.second_name].filter(Boolean).join(' ')}`.trim()
-    const plain = [
-      `A new submission is ready for review.`,
-      ``,
-      `Name: ${[sub.first_name, sub.second_name].filter(Boolean).join(' ') || '(unknown)'}`,
-      `Email: ${sub.email || '(unknown)'}`,
-      `Salon: ${sub.salon_name || '(n/a)'}`,
-      ``,
-      `View portfolio: ${portfolioLink}`,
-      `Approve: ${approveLink}`,
-      `Reject: ${rejectLink}`
-    ].join('\n')
-
-    const html = `
-      <h3>New certification submission</h3>
-      <p><strong>${[sub.first_name, sub.second_name].filter(Boolean).join(' ') || '(unknown)'}</strong>${sub.salon_name ? ` — ${escapeHtml(sub.salon_name)}` : ''}<br/>${escapeHtml(sub.email || '')}</p>
-      <p>
-        <a href="${portfolioLink}" style="background:#0b5ed7;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">View Portfolio</a>
-        &nbsp;&nbsp;
-        <a href="${approveLink}" style="background:#28a745;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Approve</a>
-        &nbsp;&nbsp;
-        <a href="${rejectLink}" style="background:#6c757d;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Reject</a>
-      </p>
-    `
-
-    await sendEmail({ to: REVIEW_TO, subject, text: plain, html })
-    return Response.json({ ok: true })
-  } catch (e) {
-    return Response.json({ error: e.message || 'Server error' }, { status: 500 })
+    return `${SUPABASE_URL}/storage/v1/object/public/${s}`
+  } catch {
+    return String(input || '')
   }
 }
 
-// ── REVIEWER ONE-CLICK GET (approve) and data fetch for /review ───────────────
-export async function GET (req) {
-  const { searchParams } = new URL(req.url)
-  const action = searchParams.get('action') || ''
-  const token  = searchParams.get('token') || ''
-  const details = searchParams.get('details') || ''
+const imgTag = (src, label) =>
+  src
+    ? `<div style="margin:10px 0;">
+         <div style="font:600 13px system-ui;margin-bottom:6px">${label}</div>
+         <img src="${src}" alt="${label}" style="max-width:600px;width:100%;border-radius:10px;border:1px solid #e5e5e5" />
+       </div>`
+    : `<div style="margin:10px 0;color:#888;font:italic 13px system-ui">${label}: (missing)</div>`
 
-  // details=1 -> JSON for the /review UI preload
-  if (details === '1') {
-    if (!token) return Response.json({ error: 'Missing token' }, { status: 400 })
-    const { data: sub, error } = await supabaseAdmin
-      .from('submissions')
-      .select('id, user_id, email, first_name, second_name, salon_name, step1_url, step2_url, step3_url, finished_url, status')
-      .eq('review_token', token)
-      .single()
-    if (error || !sub) return Response.json({ error: 'Submission not found' }, { status: 404 })
-    return Response.json({ ok: true, submission: sub }, { status: 200 })
-  }
+export async function POST(req) {
+  try {
+    const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+    let body = {}
+    try { body = await req.json() } catch {}
 
-  // one-click approval from the email
-  if (action === 'approve') {
-    if (!token) {
-      return new Response('<p>Missing token.</p>', { status: 400, headers: { 'content-type': 'text/html; charset=utf-8' } })
+    const userId = body?.userId
+    const notifyEmail = body?.notifyEmail || DEFAULT_NOTIFY
+    if (!userId) return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
+
+    // Get latest images for steps 1..4
+    const { data: rows, error: upErr } = await supabase
+      .from('uploads')
+      .select('step_number, image_url, created_at')
+      .eq('user_id', userId)
+      .in('step_number', [1, 2, 3, 4])
+      .order('created_at', { ascending: false })
+
+    if (upErr) return NextResponse.json({ error: errText(upErr) }, { status: 500 })
+
+    // First (newest) per step; normalize to absolute public URLs
+    const latest = {}
+    for (const r of rows || []) {
+      if (!latest[r.step_number]) latest[r.step_number] = toAbsolutePublic(r.image_url)
     }
 
-    const { data: sub, error } = await supabaseAdmin
-      .from('submissions')
-      .select('id, email, first_name, status')
-      .eq('review_token', token)
-      .single()
+    // Reviewer needs stylist email for approve path
+    const { data: ures, error: uerr } = await supabase.auth.admin.getUserById(userId)
+    if (uerr) return NextResponse.json({ error: errText(uerr) }, { status: 500 })
+    const userEmail = ures?.user?.email || ''
 
-    if (error || !sub) {
-      return new Response('<p>Submission not found.</p>', { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } })
-    }
+    // Token used by approve/reject flows
+    const token = crypto.randomUUID().replace(/-/g, '')
 
-    // update status if not already approved
-    if (sub.status !== 'approved') {
-      await supabaseAdmin
-        .from('submissions')
-        .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-        .eq('id', sub.id)
+    // Approve flows through /api/review/decision (already working in your app)
+    const decisionUrl = (action) =>
+      `${origin}/api/review/decision?token=${encodeURIComponent(token)}&userEmail=${encodeURIComponent(userEmail)}&action=${encodeURIComponent(action)}`
 
-      // send the approval email to the candidate
-      if (sub.email) {
-        const copy = buildApprovalCopy({ firstName: sub.first_name })
-        await sendEmail({ to: sub.email, subject: copy.subject, text: copy.text, html: copy.html })
+    // Reject uses your existing shim that persists token → /review/[token]
+    const rejectLinkUrl =
+      `${origin}/api/review/reject-link?token=${encodeURIComponent(token)}&userEmail=${encodeURIComponent(userEmail)}`
+
+    if (SENDGRID_API_KEY) {
+      sgMail.setApiKey(SENDGRID_API_KEY)
+
+      const html = `
+        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#222">
+          <h2 style="margin:0 0 12px">New Style Challenge submission</h2>
+          <p style="margin:0 0 16px">Please review the images below and choose an action.</p>
+
+          ${imgTag(latest[1], 'Step 1')}
+          ${imgTag(latest[2], 'Step 2')}
+          ${imgTag(latest[3], 'Step 3')}
+          ${imgTag(latest[4], 'Finished Look')}
+
+          <div style="margin:18px 0;display:flex;gap:10px">
+            <a href="${decisionUrl('approve')}"
+               style="background:#28a745;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;display:inline-block">
+               Approve
+            </a>
+            <a href="${rejectLinkUrl}"
+               style="background:#c82333;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;display:inline-block">
+               Reject
+            </a>
+          </div>
+        </div>
+      `
+
+      try {
+        await sgMail.send({
+          to: notifyEmail,
+          from: 'no-reply@accesslonghair.com',
+          subject: 'Style Challenge — submission to review',
+          html
+        })
+      } catch (mErr) {
+        return NextResponse.json({ mailer: 'failed', token })
       }
     }
 
-    // friendly HTML page for the reviewer
-    const html = `
-      <!doctype html>
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>Approved</title>
-      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:24px">
-        <h2 style="margin:0 0 8px">Approved ✔</h2>
-        <p style="margin:0 0 12px">The candidate has been notified by email.</p>
-      </div>`
-    return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
-  }
-
-  // any other GET -> helpful hint
-  return Response.json({ ok: true, message: 'Use PUT to notify reviewer or POST to record a decision.' })
-}
-
-// ── REVIEWER POST (reject/approve from the /review UI) ────────────────────────
-export async function POST (req) {
-  try {
-    const { token, decision, reason, comments } = await req.json()
-    if (!token || !decision) return Response.json({ error: 'Missing token or decision' }, { status: 400 })
-    if (!['approve', 'reject'].includes(decision)) return Response.json({ error: 'Invalid decision' }, { status: 400 })
-
-    const { data: sub, error } = await supabaseAdmin
-      .from('submissions')
-      .select('id, email, first_name')
-      .eq('review_token', token)
-      .single()
-
-    if (error || !sub) return Response.json({ error: 'Submission not found' }, { status: 404 })
-
-    if (decision === 'approve') {
-      await supabaseAdmin
-        .from('submissions')
-        .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-        .eq('id', sub.id)
-
-      if (sub.email) {
-        const copy = buildApprovalCopy({ firstName: sub.first_name })
-        await sendEmail({ to: sub.email, subject: copy.subject, text: copy.text, html: copy.html })
-      }
-      return Response.json({ ok: true })
-    }
-
-    // reject
-    await supabaseAdmin
-      .from('submissions')
-      .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reason, comments })
-      .eq('id', sub.id)
-
-    if (sub.email) {
-      const copy = buildRejectionCopy({ firstName: sub.first_name, reason, comments })
-      await sendEmail({ to: sub.email, subject: copy.subject, text: copy.text, html: copy.html })
-    }
-    return Response.json({ ok: true })
+    return NextResponse.json({ mailer: 'sent', token })
   } catch (e) {
-    return Response.json({ error: e.message || 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: errText(e) }, { status: 500 })
   }
 }

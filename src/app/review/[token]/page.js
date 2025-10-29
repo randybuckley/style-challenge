@@ -1,110 +1,73 @@
+// src/app/review/[token]/page.js
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 
-const reasons = [
-  'Lighting / Focus',
-  'Angle / Framing',
-  'Doesn’t match reference',
-  'Finish / Polish',
-  'Upload quality',
+const REASONS = [
+  'One or more steps are missing',
+  'Images unclear / blurry',
+  'Lighting / background needs improvement',
+  'Style does not match the exemplar',
+  'Retake finished look',
   'Other'
 ]
 
-export default function ReviewPage({ params }) {
-  const token = params.token
-  const [loading, setLoading] = useState(true)
-  const [sub, setSub] = useState(null)
-  const [action, setAction] = useState('approve')
-  const [reason, setReason] = useState('')
+export default function ReviewRejectPage() {
+  const { token } = useParams()
+  const qp = useSearchParams()
+  const userEmail = qp.get('userEmail') || '' // fallback from shim
+
+  const [reason, setReason] = useState(REASONS[0])
   const [notes, setNotes] = useState('')
-  const [reviewerEmail, setReviewerEmail] = useState('')
-  const [msg, setMsg] = useState('')
+  const [status, setStatus] = useState({ kind: 'idle', msg: '' })
 
-  useEffect(() => {
-    const run = async () => {
-      const res = await fetch(`/api/review-certification?token=${encodeURIComponent(token)}`)
-      if (res.ok) setSub((await res.json()).submission)
-      setLoading(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    setStatus({ kind: 'busy', msg: 'Sending feedback…' })
+    try {
+      const res = await fetch('/api/review/reject', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token, reason, notes, userEmail })
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to send feedback')
+      setStatus({ kind: 'ok', msg: `Feedback sent to ${data.sentTo}` })
+    } catch (err) {
+      setStatus({ kind: 'err', msg: err.message || String(err) })
     }
-    run()
-  }, [token])
-
-  const submitDecision = async () => {
-    setMsg('')
-    const res = await fetch('/api/review-certification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, action, reason, notes, reviewerEmail })
-    })
-    if (res.ok) setMsg('Decision saved and email sent.')
-    else setMsg('Error saving decision.')
   }
 
-  if (loading) return <main style={shell}><p>Loading…</p></main>
-  if (!sub) return <main style={shell}><p>Submission not found.</p></main>
-
   return (
-    <main style={page}>
-      <h1>Review Submission</h1>
-      <p><strong>User:</strong> {sub.email}</p>
-      <p><strong>Name:</strong> {[sub.first_name, sub.second_name].filter(Boolean).join(' ') || '—'}</p>
-      <p><strong>Salon:</strong> {sub.salon_name || '—'}</p>
-      <div style={grid}>
-        {sub.step1_url && <img src={sub.step1_url} alt="Step 1" style={img} />}
-        {sub.step2_url && <img src={sub.step2_url} alt="Step 2" style={img} />}
-        {sub.step3_url && <img src={sub.step3_url} alt="Step 3" style={img} />}
-        {sub.finished_url && <img src={sub.finished_url} alt="Finished" style={{ ...img, gridColumn: 'span 2' }} />}
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <label>
-          Reviewer email:{' '}
-          <input value={reviewerEmail} onChange={(e) => setReviewerEmail(e.target.value)} style={input} />
-        </label>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <label>
-          Decision:{' '}
-          <select value={action} onChange={(e) => setAction(e.target.value)} style={input}>
-            <option value="approve">Approve</option>
-            <option value="reject">Reject</option>
+    <div style={{minHeight:'100vh',background:'#0f0f10',color:'#eaeaea',display:'flex',justifyContent:'center',alignItems:'flex-start',padding:'40px 16px'}}>
+      <div style={{width:'100%',maxWidth:720,background:'#17181a',border:'1px solid #2a2b2f',borderRadius:16,boxShadow:'0 8px 24px rgba(0,0,0,.35)',padding:22}}>
+        <h1 style={{fontSize:22,margin:'0 0 12px'}}>Send feedback to the stylist</h1>
+        <form onSubmit={submit} style={{opacity: status.kind === 'busy' ? .7 : 1}}>
+          <label htmlFor="reason" style={{display:'block',margin:'12px 0 6px',fontWeight:600}}>Reason</label>
+          <select id="reason" value={reason} onChange={(e)=>setReason(e.target.value)}
+                  style={{width:'100%',borderRadius:10,border:'1px solid #2a2b2f',background:'#0f0f10',color:'#eaeaea',padding:'10px 12px'}}>
+            {REASONS.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
-        </label>
+
+          <label htmlFor="notes" style={{display:'block',margin:'12px 0 6px',fontWeight:600}}>Additional feedback (optional)</label>
+          <textarea id="notes"
+            placeholder="Be specific and kind—what should they change or redo?"
+            value={notes} onChange={(e)=>setNotes(e.target.value)}
+            style={{width:'100%',minHeight:120,resize:'vertical',borderRadius:10,border:'1px solid #2a2b2f',background:'#0f0f10',color:'#eaeaea',padding:'10px 12px'}}
+          />
+
+          <div style={{display:'flex',gap:10,marginTop:14}}>
+            <button type="submit" style={{cursor:'pointer',fontWeight:700,background:'#c82333',borderColor:'#c82333',color:'#fff',border:'1px solid #c82333',padding:'10px 12px',borderRadius:10}}>
+              Send Feedback
+            </button>
+          </div>
+        </form>
+
+        {status.kind === 'ok'   && <div style={{marginTop:12,padding:'10px 12px',borderRadius:10,background:'#153d19',border:'1px solid #2f6b36'}}>{status.msg}</div>}
+        {status.kind === 'err'  && <div style={{marginTop:12,padding:'10px 12px',borderRadius:10,background:'#3d1515',border:'1px solid #6b2f2f'}}>{status.msg}</div>}
+        {status.kind === 'busy' && <div style={{marginTop:12,padding:'10px 12px',borderRadius:10,border:'1px solid #2a2b2f'}}>Sending…</div>}
       </div>
-
-      {action === 'reject' && (
-        <div style={{ marginTop: 12 }}>
-          <label>
-            Reason:{' '}
-            <select value={reason} onChange={(e) => setReason(e.target.value)} style={input}>
-              <option value="">Select…</option>
-              {reasons.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </label>
-        </div>
-      )}
-
-      <div style={{ marginTop: 12 }}>
-        <label>
-          Notes:{' '}
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} style={{ ...input, width: '100%' }} />
-        </label>
-      </div>
-
-      <button onClick={submitDecision} style={primaryBtn} disabled={action==='reject' && !reason}>
-        {action === 'approve' ? 'Approve & Email User' : 'Reject & Email User'}
-      </button>
-
-      {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
-    </main>
+    </div>
   )
 }
-
-const page = { maxWidth: 920, margin: '0 auto', padding: 20, fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif' }
-const shell = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif' }
-const grid = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 10 }
-const img = { width: '100%', height: 'auto', border: '1px solid #ccc', borderRadius: 8 }
-const input = { padding: '6px 8px', borderRadius: 6, border: '1px solid #bbb' }
-const primaryBtn = { marginTop: 14, background: '#28a745', color: '#fff', padding: '10px 16px', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }
