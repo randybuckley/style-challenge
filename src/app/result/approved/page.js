@@ -74,7 +74,7 @@ function ApprovedResultInner() {
         style={{
           width: 'min(920px, 100%)',
           background: '#17181a',
-          border: '1px solid '#2a2b2f',
+          border: '1px solid #2a2b2f',
           borderRadius: '16px',
           boxShadow: '0 8px 24px rgba(0,0,0,.35)',
           padding: '22px',
