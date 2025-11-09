@@ -19,7 +19,7 @@ export default function PortfolioPage() {
 
   const router = useRouter()
 
-  // Refs we temporarily tweak for PDF export
+  // Refs used for PDF export
   const rootRef = useRef(null)
   const hatchRef = useRef(null)
   const stepsRef = useRef(null)
@@ -150,46 +150,44 @@ export default function PortfolioPage() {
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
-    if (!root || !hatch) return
+    const parchmentEl = parchmentRef.current
 
-    const PDF_W = 816
-    const PDF_H = 1056
+    if (!root || !hatch || !parchmentEl) return
 
-    const prevRoot = root.getAttribute('style') || ''
-    const prevHatch = hatch.getAttribute('style') || ''
+    const prevRootStyle = root.getAttribute('style') || ''
+    const prevHatchStyle = hatch.getAttribute('style') || ''
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
     const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
-    const prevFinishedWidth = finishedImgRef.current?.style.width || ''
-    const prevFinishedHeight = finishedImgRef.current?.style.height || ''
+    const prevParchmentPadding = parchmentEl.style.padding || ''
+    const prevParchmentOverflow = parchmentEl.style.overflow || ''
 
-    root.style.width = `${PDF_W}px`
-    root.style.height = `${PDF_H}px`
-    root.style.margin = '0 auto'
-    hatch.style.padding = '0'
-    hatch.style.borderRadius = '0'
-    hatch.style.minHeight = `${PDF_H}px`
+    // 1) Minimal tweaks so html2canvas gets a clean capture
     hatch.style.boxShadow = 'none'
-
-    if (stepsRef.current)
-      stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
+    if (stepsRef.current) {
+      stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    }
+
+    parchmentEl.style.padding = '16px 16px 24px'
+    parchmentEl.style.overflow = 'hidden' // clip to rounded corners
+
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
     thumbCards.forEach((card) => {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
-    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
-    const imgs = root.querySelectorAll('img[data-embed="true"]')
+    // 2) Inline all images inside the parchment to avoid CORS issues
+    const imgs = parchmentEl.querySelectorAll('img[data-embed="true"]')
     await Promise.all(
       Array.from(imgs).map(async (img) => {
         try {
           const dataUrl = await toDataURL(img.src)
           img.src = dataUrl
         } catch {
-          // ignore conversion errors, keep original src
+          // keep original if conversion fails
         }
         img.removeAttribute('width')
         img.removeAttribute('height')
@@ -197,37 +195,39 @@ export default function PortfolioPage() {
       })
     )
 
-    // --- ensure Finished Look image keeps correct aspect ratio in PDF ---
     if (finishedImgRef.current) {
-      const imgEl = finishedImgRef.current
-      const natW = imgEl.naturalWidth
-      const natH = imgEl.naturalHeight
-
-      if (natW && natH) {
-        const MAX_W = 540 // pixels inside the card
-        const MAX_H = 460
-        const scale = Math.min(MAX_W / natW, MAX_H / natH)
-
-        imgEl.style.width = `${natW * scale}px`
-        imgEl.style.height = `${natH * scale}px`
-        imgEl.style.maxHeight = `${MAX_H}px`
-      }
+      finishedImgRef.current.style.maxHeight = '460px'
     }
-    // --------------------------------------------------------------------
+
+    // 3) Use the parchment size for the PDF page (with small buffer)
+    const target = parchmentEl
+    const pdfWidth = target.scrollWidth || target.offsetWidth || 816
+    const pdfHeight =
+      (target.scrollHeight || target.offsetHeight || 1056) + 8 // tiny buffer to avoid page 2
 
     await html2pdf()
-      .from(root)
+      .from(parchmentEl)
       .set({
         margin: 0,
         filename: 'style-challenge-portfolio.pdf',
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff'
+        },
+        jsPDF: {
+          unit: 'px',
+          format: [pdfWidth, pdfHeight],
+          orientation: 'portrait'
+        },
+        pageBreak: { mode: ['avoid-all'] }
       })
       .save()
 
-    root.setAttribute('style', prevRoot)
-    hatch.setAttribute('style', prevHatch)
+    // 4) Restore styles
+    root.setAttribute('style', prevRootStyle)
+    hatch.setAttribute('style', prevHatchStyle)
     if (stepsRef.current)
       stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
@@ -235,10 +235,10 @@ export default function PortfolioPage() {
       (card, i) => (card.style.minHeight = prevCardHeights[i] || '')
     )
     if (finishedImgRef.current) {
-      finishedImgRef.current.style.width = prevFinishedWidth
-      finishedImgRef.current.style.height = prevFinishedHeight
       finishedImgRef.current.style.maxHeight = prevFinishedMaxH
     }
+    parchmentEl.style.padding = prevParchmentPadding
+    parchmentEl.style.overflow = prevParchmentOverflow
   }
 
   const handleBecomeCertified = async () => {
@@ -374,12 +374,12 @@ export default function PortfolioPage() {
                 ))}
               </div>
 
-              {/* Finished look */}
+              {/* Finished look plate (label + image together) */}
               <div style={finishedWrap}>
-                <div style={finishedLabel}>
-                  Finished Look — Challenge Number One
-                </div>
                 <div style={finishedCard}>
+                  <div style={finishedLabel}>
+                    Finished Look — Challenge Number One
+                  </div>
                   {images[4] ? (
                     <img
                       ref={finishedImgRef}
@@ -532,7 +532,8 @@ const parchment = {
   background: 'url(/parchment.jpg) repeat, #f3ecdc',
   borderRadius: 10,
   padding: '16px 16px 36px',
-  color: '#111'
+  color: '#111',
+  overflow: 'hidden' // keep corners clean in browser & PDF
 }
 
 /* Name line */
@@ -552,7 +553,7 @@ const stepsGrid = {
   marginTop: 6
 }
 
-/* translucent “plates” like the logo */
+/* translucent plates */
 const thumbCard = {
   background: 'rgba(255,255,255,0.60)',
   border: '1px solid rgba(255,255,255,0.82)',
@@ -580,14 +581,23 @@ const thumbImg = {
   opacity: 0.92
 }
 
+/* Finished look */
 const finishedWrap = { marginTop: 16 }
-const finishedLabel = { textAlign: 'center', fontWeight: 700, marginBottom: 10 }
+const finishedLabel = {
+  textAlign: 'center',
+  fontWeight: 700,
+  marginBottom: 10,
+  fontSize: 13,
+  color: '#444'
+}
 const finishedCard = {
-  background: '#fff',
-  border: '1px solid #e6e6e6',
+  background: 'rgba(255,255,255,0.60)',
+  border: '1px solid rgba(255,255,255,0.82)',
   borderRadius: 16,
-  boxShadow: '0 8px 22px rgba(0,0,0,.08)',
-  padding: 12
+  padding: 12,
+  boxShadow: '0 6px 18px rgba(0,0,0,.12)',
+  maxWidth: 540,
+  margin: '0 auto'
 }
 const finishedImg = {
   width: '100%',
