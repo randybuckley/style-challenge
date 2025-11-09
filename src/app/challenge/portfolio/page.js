@@ -1,3 +1,4 @@
+// src/app/challenge/portfolio/page.js
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
@@ -13,26 +14,26 @@ export default function PortfolioPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
-  const [isPhoneLandscape, setIsPhoneLandscape] = useState(false) // NEW
+  const [isPhoneLandscape, setIsPhoneLandscape] = useState(false)
+  const [error, setError] = useState('')
 
   const router = useRouter()
 
   // Refs we temporarily tweak for PDF export
-  const rootRef = useRef(null)       // whole export root
-  const hatchRef = useRef(null)      // cross-hatch frame
-  const stepsRef = useRef(null)      // steps grid container
-  const nameRef = useRef(null)       // name H2
+  const rootRef = useRef(null)
+  const hatchRef = useRef(null)
+  const stepsRef = useRef(null)
+  const nameRef = useRef(null)
   const finishedImgRef = useRef(null)
   const logoRef = useRef(null)
   const parchmentRef = useRef(null)
 
-  // ---------- load/profile ----------
+  // ---------- layout responsiveness ----------
   useEffect(() => {
     const measure = () => {
       const w = typeof window !== 'undefined' ? window.innerWidth : 0
       const h = typeof window !== 'undefined' ? window.innerHeight : 0
       setIsMobile(w < 560)
-      // Phone-in-landscape heuristic: short viewport height
       setIsPhoneLandscape(h > 0 && h <= 480 && w >= 560)
     }
     measure()
@@ -40,6 +41,7 @@ export default function PortfolioPage() {
     return () => window.removeEventListener('resize', measure)
   }, [])
 
+  // ---------- load profile + uploads ----------
   useEffect(() => {
     const run = async () => {
       const { data: sessionData } = await supabase.auth.getSession()
@@ -83,16 +85,30 @@ export default function PortfolioPage() {
 
   const saveProfile = async () => {
     if (!user) return
+    const fn = (firstName || '').trim()
+    const sn = (secondName || '').trim()
+    const sa = (salonName || '').trim()
+
+    if (!fn || !sn || !sa) {
+      setError(
+        'Please enter your first name, last name, and salon name before saving.'
+      )
+      return
+    }
+
     setSaving(true)
+    setError('')
     try {
       await supabase.from('profiles').upsert({
         id: user.id,
         email: user.email ?? null,
-        first_name: (firstName || '').trim() || null,
-        second_name: (secondName || '').trim() || null,
-        salon_name: (salonName || '').trim() || null
+        first_name: fn,
+        second_name: sn,
+        salon_name: sa
       })
-    } finally { setSaving(false) }
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ---------- helpers ----------
@@ -111,8 +127,26 @@ export default function PortfolioPage() {
       img.src = url
     })
 
-  // ---------- PDF export (unchanged) ----------
+  const ensureIdentityComplete = () => {
+    const fn = (firstName || '').trim()
+    const sn = (secondName || '').trim()
+    const sa = (salonName || '').trim()
+
+    if (!fn || !sn || !sa) {
+      const msg =
+        'Please add your first name, last name, and salon name — this is how they will appear on your portfolio and certificate.'
+      setError(msg)
+      alert(msg)
+      return false
+    }
+    setError('')
+    return true
+  }
+
+  // ---------- PDF export ----------
   const downloadPDF = async () => {
+    if (!ensureIdentityComplete()) return
+
     const html2pdf = (await import('html2pdf.js')).default
     const root = rootRef.current
     const hatch = hatchRef.current
@@ -135,22 +169,26 @@ export default function PortfolioPage() {
     hatch.style.minHeight = `${PDF_H}px`
     hatch.style.boxShadow = 'none'
 
-    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
+    if (stepsRef.current)
+      stepsRef.current.style.gridTemplateColumns = 'repeat(3, 1fr)'
     if (nameRef.current) nameRef.current.style.fontSize = '28px'
     const thumbCards = root.querySelectorAll('[data-thumb="1"]')
     const prevCardHeights = []
-    thumbCards.forEach(card => {
+    thumbCards.forEach((card) => {
       prevCardHeights.push(card.style.minHeight)
       card.style.minHeight = '210px'
     })
     if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = '460px'
 
     const imgs = root.querySelectorAll('img[data-embed="true"]')
-    const originals = []
     await Promise.all(
       Array.from(imgs).map(async (img) => {
-        originals.push([img, img.src])
-        try { img.src = await toDataURL(img.src) } catch {}
+        try {
+          const dataUrl = await toDataURL(img.src)
+          img.src = dataUrl
+        } catch {
+          // ignore conversion errors, keep original src
+        }
         img.removeAttribute('width')
         img.removeAttribute('height')
         img.style.height = 'auto'
@@ -170,10 +208,20 @@ export default function PortfolioPage() {
 
     root.setAttribute('style', prevRoot)
     hatch.setAttribute('style', prevHatch)
-    if (stepsRef.current) stepsRef.current.style.gridTemplateColumns = prevStepsCols
+    if (stepsRef.current)
+      stepsRef.current.style.gridTemplateColumns = prevStepsCols
     if (nameRef.current) nameRef.current.style.fontSize = prevNameSize
-    thumbCards.forEach((card, i) => (card.style.minHeight = prevCardHeights[i] || ''))
-    if (finishedImgRef.current) finishedImgRef.current.style.maxHeight = prevFinishedMaxH
+    thumbCards.forEach(
+      (card, i) => (card.style.minHeight = prevCardHeights[i] || '')
+    )
+    if (finishedImgRef.current)
+      finishedImgRef.current.style.maxHeight = prevFinishedMaxH
+  }
+
+  const handleBecomeCertified = async () => {
+    if (!ensureIdentityComplete()) return
+    await saveProfile()
+    router.push('/challenge/certify')
   }
 
   if (loading) {
@@ -184,22 +232,64 @@ export default function PortfolioPage() {
     )
   }
 
-  const nameLine = [firstName, secondName].filter(Boolean).join(' ') || user?.email
-  const thumbCardDynamic = { ...thumbCard, minHeight: isPhoneLandscape ? 200 : 260 } // NEW
+  const nameLine =
+    [firstName, secondName].filter(Boolean).join(' ') || user?.email
+  const thumbCardDynamic = {
+    ...thumbCard,
+    minHeight: isPhoneLandscape ? 200 : 260
+  }
 
   return (
     <main style={pageShell}>
-      {/* editable identity bar */}
-      <div style={editBar}>
-        <div style={editRow}>
-          <input value={firstName} onChange={(e)=>setFirstName(e.target.value)} placeholder="First Name" style={field}/>
-          <input value={secondName} onChange={(e)=>setSecondName(e.target.value)} placeholder="Last Name" style={field}/>
-          <input value={salonName} onChange={(e)=>setSalonName(e.target.value)} placeholder="Salon" style={{...field,minWidth:220}}/>
-        </div>
-        <div style={saveRow}>
-          <button onClick={saveProfile} disabled={saving} style={btnSmall}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+      {/* Intro + identity instructions */}
+      <div style={introWrap}>
+        <h1 style={introTitle}>Your Style Challenge Portfolio</h1>
+        <p style={introText}>
+          Before you download your portfolio or become Patrick Cameron certified,
+          please add your <strong>first name</strong>, <strong>last name</strong>,
+          and <strong>salon name</strong> exactly as you want them to appear on
+          your certificate.
+        </p>
+
+        {/* editable identity bar */}
+        <div style={editBar}>
+          <div style={editRow}>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>First name</label>
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="e.g. Randy"
+                style={field}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Last name</label>
+              <input
+                value={secondName}
+                onChange={(e) => setSecondName(e.target.value)}
+                placeholder="e.g. Buckley"
+                style={field}
+              />
+            </div>
+            <div style={{ ...fieldGroup, flexBasis: '100%', maxWidth: 320 }}>
+              <label style={fieldLabel}>Salon name</label>
+              <input
+                value={salonName}
+                onChange={(e) => setSalonName(e.target.value)}
+                placeholder="e.g. BigDeal Hair"
+                style={{ ...field, minWidth: 220 }}
+              />
+            </div>
+          </div>
+          <div style={saveRow}>
+            <button onClick={saveProfile} disabled={saving} style={btnSmall}>
+              {saving ? 'Saving…' : 'Save details'}
+            </button>
+          </div>
+          {error && (
+            <div style={errorText}>{error}</div>
+          )}
         </div>
       </div>
 
@@ -209,62 +299,93 @@ export default function PortfolioPage() {
           <div style={sheet}>
             <div ref={parchmentRef} style={parchment} data-parchment="1">
               {/* translucent rounded logo */}
-              <div style={{ textAlign:'center', marginTop:6, marginBottom:6 }}>
+              <div
+                style={{ textAlign: 'center', marginTop: 6, marginBottom: 6 }}
+              >
                 <img
                   ref={logoRef}
                   src="/logo.jpeg"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
-                  style={{ width:220, height:'auto', display:'inline-block', opacity:.6, borderRadius:16 }}
+                  style={{
+                    width: 220,
+                    height: 'auto',
+                    display: 'inline-block',
+                    opacity: 0.6,
+                    borderRadius: 16
+                  }}
                 />
               </div>
 
               {/* prominent name line */}
               <h2 ref={nameRef} style={stylistName}>
                 {nameLine}
-                {salonName ? <span style={{ fontWeight:500 }}>{' — '}{salonName}</span> : null}
+                {salonName ? (
+                  <span style={{ fontWeight: 500 }}>
+                    {' — '}
+                    {salonName}
+                  </span>
+                ) : null}
               </h2>
 
               {/* Steps */}
               <div
                 ref={stepsRef}
-                style={{ ...stepsGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)' }}
+                style={{
+                  ...stepsGrid,
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)'
+                }}
               >
-                {[1,2,3].map(n=>(
+                {[1, 2, 3].map((n) => (
                   <div key={n} data-thumb="1" style={thumbCardDynamic}>
                     <div style={thumbLabel}>Step {n}</div>
-                    {images[n]
-                      ? <img src={images[n]} alt={`Step ${n}`} data-embed="true" style={thumbImg}/>
-                      : <div style={missing}>No image</div>}
+                    {images[n] ? (
+                      <img
+                        src={images[n]}
+                        alt={`Step ${n}`}
+                        data-embed="true"
+                        style={thumbImg}
+                      />
+                    ) : (
+                      <div style={missing}>No image</div>
+                    )}
                   </div>
                 ))}
               </div>
 
               {/* Finished look */}
               <div style={finishedWrap}>
-                <div style={finishedLabel}>Finished Look — Challenge Number One</div>
+                <div style={finishedLabel}>
+                  Finished Look — Challenge Number One
+                </div>
                 <div style={finishedCard}>
-                  {images[4]
-                    ? <img
-                        ref={finishedImgRef}
-                        src={images[4]}
-                        alt="Finished Look"
-                        data-embed="true"
-                        style={finishedImg}
-                      />
-                    : <div style={missing}>No final image</div>}
+                  {images[4] ? (
+                    <img
+                      ref={finishedImgRef}
+                      src={images[4]}
+                      alt="Finished Look"
+                      data-embed="true"
+                      style={finishedImg}
+                    />
+                  ) : (
+                    <div style={missing}>No final image</div>
+                  )}
                 </div>
               </div>
-
             </div>
           </div>
         </div>
       </div>
 
       {/* actions */}
-      <div style={{ marginTop: 18, textAlign:'center' }}>
-        <button onClick={downloadPDF} style={{ ...btn, marginRight:10 }}>📄 Download Portfolio</button>
-        <button onClick={()=>router.push('/challenge/certify')} style={{ ...btn, background:'#28a745' }}>
+      <div style={{ marginTop: 18, textAlign: 'center' }}>
+        <button onClick={downloadPDF} style={{ ...btn, marginRight: 10 }}>
+          📄 Download Portfolio
+        </button>
+        <button
+          onClick={handleBecomeCertified}
+          style={{ ...btn, background: '#28a745' }}
+        >
           ✅ Become Certified
         </button>
       </div>
@@ -287,6 +408,84 @@ const pageShell = {
 }
 
 const container = { width: 'min(800px, 95vw)' }
+
+/* Intro & identity card */
+const introWrap = {
+  width: 'min(800px, 95vw)',
+  marginBottom: 16
+}
+
+const introTitle = {
+  color: '#ffffff',
+  fontSize: 22,
+  fontWeight: 800,
+  textAlign: 'center',
+  margin: '0 0 6px'
+}
+
+const introText = {
+  color: '#dddddd',
+  fontSize: 14,
+  textAlign: 'center',
+  margin: '0 0 14px',
+  lineHeight: 1.5
+}
+
+/* EDIT BAR layout */
+const editBar = {
+  background: '#121212',
+  borderRadius: 12,
+  border: '1px solid #2f2f2f',
+  padding: '10px 12px 12px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  justifyContent: 'center',
+  alignItems: 'stretch'
+}
+
+const editRow = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 10,
+  justifyContent: 'center'
+}
+
+const saveRow = {
+  display: 'flex',
+  justifyContent: 'center',
+  marginTop: 4
+}
+
+const fieldGroup = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  minWidth: 160,
+  maxWidth: 260
+}
+
+const fieldLabel = {
+  color: '#bbbbbb',
+  fontSize: 12,
+  fontWeight: 500
+}
+
+const field = {
+  background: '#161616',
+  color: '#fff',
+  border: '1px solid #333',
+  borderRadius: 8,
+  padding: '10px 12px',
+  fontSize: 14
+}
+
+const errorText = {
+  marginTop: 4,
+  textAlign: 'center',
+  color: '#ffb3b3',
+  fontSize: 13
+}
 
 /* Cross-hatch frame */
 const hatchWrap = {
@@ -344,7 +543,12 @@ const thumbCard = {
   alignItems: 'center',
   minHeight: 260
 }
-const thumbLabel = { fontWeight: 700, fontSize: 14, color: '#5b5b5b', marginBottom: 8 }
+const thumbLabel = {
+  fontWeight: 700,
+  fontSize: 14,
+  color: '#5b5b5b',
+  marginBottom: 8
+}
 const thumbImg = {
   width: '100%',
   aspectRatio: '1 / 1',
@@ -395,34 +599,4 @@ const btnSmall = {
   padding: '10px 12px',
   fontWeight: 700,
   cursor: 'pointer'
-}
-
-/* EDIT BAR layout: inputs on one row (wraps), Save on its own row below */
-const editBar = {
-  width: 'min(800px, 95vw)',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  justifyContent: 'center',
-  alignItems: 'stretch',
-  marginBottom: 10
-}
-const editRow = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: 8,
-  justifyContent: 'center'
-}
-const saveRow = {
-  display: 'flex',
-  justifyContent: 'center'
-}
-
-const field = {
-  background: '#161616',
-  color: '#fff',
-  border: '1px solid #333',
-  borderRadius: 8,
-  padding: '10px 12px',
-  minWidth: 160
 }
