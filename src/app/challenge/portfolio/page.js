@@ -160,6 +160,8 @@ export default function PortfolioPage() {
     const prevStepsCols = stepsRef.current?.style.gridTemplateColumns || ''
     const prevNameSize = nameRef.current?.style.fontSize || ''
     const prevFinishedMaxH = finishedImgRef.current?.style.maxHeight || ''
+    const prevFinishedWidth = finishedImgRef.current?.style.width || ''
+    const prevFinishedHeight = finishedImgRef.current?.style.height || ''
 
     root.style.width = `${PDF_W}px`
     root.style.height = `${PDF_H}px`
@@ -195,6 +197,24 @@ export default function PortfolioPage() {
       })
     )
 
+    // --- ensure Finished Look image keeps correct aspect ratio in PDF ---
+    if (finishedImgRef.current) {
+      const imgEl = finishedImgRef.current
+      const natW = imgEl.naturalWidth
+      const natH = imgEl.naturalHeight
+
+      if (natW && natH) {
+        const MAX_W = 540 // pixels inside the card
+        const MAX_H = 460
+        const scale = Math.min(MAX_W / natW, MAX_H / natH)
+
+        imgEl.style.width = `${natW * scale}px`
+        imgEl.style.height = `${natH * scale}px`
+        imgEl.style.maxHeight = `${MAX_H}px`
+      }
+    }
+    // --------------------------------------------------------------------
+
     await html2pdf()
       .from(root)
       .set({
@@ -214,8 +234,11 @@ export default function PortfolioPage() {
     thumbCards.forEach(
       (card, i) => (card.style.minHeight = prevCardHeights[i] || '')
     )
-    if (finishedImgRef.current)
+    if (finishedImgRef.current) {
+      finishedImgRef.current.style.width = prevFinishedWidth
+      finishedImgRef.current.style.height = prevFinishedHeight
       finishedImgRef.current.style.maxHeight = prevFinishedMaxH
+    }
   }
 
   const handleBecomeCertified = async () => {
@@ -287,9 +310,7 @@ export default function PortfolioPage() {
               {saving ? 'Saving…' : 'Save details'}
             </button>
           </div>
-          {error && (
-            <div style={errorText}>{error}</div>
-          )}
+          {error && <div style={errorText}>{error}</div>}
         </div>
       </div>
 
