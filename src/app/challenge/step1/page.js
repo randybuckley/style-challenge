@@ -19,6 +19,9 @@ function ChallengeStep1Page() {
   const [adminDemo, setAdminDemo] = useState(false)
   const [uploading, setUploading] = useState(false)
 
+  // new: simple orientation gate
+  const [canUpload, setCanUpload] = useState(true)
+
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -37,46 +40,59 @@ function ChallengeStep1Page() {
     })
   }, [router, searchParams])
 
-  // Enforce portrait orientation + build preview URL
   const handleFileChange = (fileObj) => {
-    setUploadMessage('')
-
-    // If user cancels chooser, clear state
     if (!fileObj) {
       setFile(null)
       setPreviewUrl('')
+      setUploadMessage('')
+      setCanUpload(true)
       return
     }
 
-    // Inspect image dimensions before accepting it
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const img = new Image()
-      img.onload = () => {
-        // Require portrait: height >= width
-        if (img.width > img.height) {
-          alert(
-            'Please use portrait orientation (taller than wide).\n\n' +
-              'Hold your phone upright and retake the photo so the full head and shoulders fill the frame.'
-          )
-          setFile(null)
-          setPreviewUrl('')
-          return
-        }
+    // Always show preview immediately
+    const objectUrl = URL.createObjectURL(fileObj)
+    setFile(fileObj)
+    setPreviewUrl(objectUrl)
+    setImageUrl('') // clear any old stored image
+    setUploadMessage('Checking photo…')
+    setCanUpload(true)
 
-        // Portrait is OK – store file + preview
-        setFile(fileObj)
-        setPreviewUrl(URL.createObjectURL(fileObj))
+    // Async orientation check (does NOT block preview)
+    const img = new Image()
+    img.onload = () => {
+      const w = img.naturalWidth || img.width
+      const h = img.naturalHeight || img.height
+
+      if (!w || !h) {
+        setUploadMessage('Photo loaded. Please ensure the head fills the oval.')
+        setCanUpload(true)
+        return
       }
-      img.src = ev.target.result
+
+      // Very simple rule: portrait-ish and not ultra-wide
+      const portraitish = h >= w * 0.9
+
+      if (!portraitish) {
+        setUploadMessage(
+          'This looks landscape. Please retake in portrait so the head and hair fill the oval.'
+        )
+        setCanUpload(false)
+      } else {
+        setUploadMessage(
+          'Looks good. Make sure the head and hair fill the oval, then confirm when you are happy.'
+        )
+        setCanUpload(true)
+      }
     }
-    reader.readAsDataURL(fileObj)
+    img.src = objectUrl
   }
 
-  // Revoke previous object URL to avoid memory leaks
+  // Revoke previous object URL ONLY on unmount/change
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (previewUrl && previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previewUrl)
+      }
     }
   }, [previewUrl])
 
@@ -93,6 +109,13 @@ function ChallengeStep1Page() {
 
     if (!file || !user) {
       setUploadMessage('Please select a photo first.')
+      return
+    }
+
+    if (!canUpload && !adminDemo) {
+      setUploadMessage(
+        'This photo is not in portrait. Please retake in portrait so the head and hair fill the oval.'
+      )
       return
     }
 
@@ -143,6 +166,7 @@ function ChallengeStep1Page() {
     setImageUrl('')
     setUploadMessage('')
     setShowOptions(false)
+    setCanUpload(true)
   }
 
   const proceedToNextStep = () => {
@@ -151,45 +175,54 @@ function ChallengeStep1Page() {
 
   if (loading) return <p>Loading challenge step 1…</p>
 
-  // Simple shared styles for the portrait frame + oval overlay
-  const frameWrap = {
+  const showImg = previewUrl || imageUrl
+
+  const overlayFrame = {
     position: 'relative',
     width: '100%',
-    maxWidth: 260,
-    aspectRatio: '3 / 4', // explicit portrait ratio
+    maxWidth: 320,
+    margin: '0 auto',
+  }
+
+  const previewImageStyle = {
+    width: '100%',
+    aspectRatio: '3 / 4',
+    objectFit: 'cover',
     borderRadius: 12,
-    overflow: 'hidden',
-    background: '#000',
     border: '1px solid #ccc',
     boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-    marginTop: 4,
+    background: '#000',
   }
 
-  const frameImage = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    display: 'block',
-  }
-
-  const framePlaceholder = {
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: '#999',
-    fontSize: 13,
-    background: '#222',
-  }
-
-  const ovalOverlay = {
+  const ovalMask = {
     position: 'absolute',
     inset: 0,
     pointerEvents: 'none',
-    borderRadius: '50% / 60%',
-    boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
-    border: '2px dashed rgba(255,255,255,0.8)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }
+
+  const oval = {
+    width: '70%',
+    height: '65%',
+    borderRadius: '50%',
+    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
+    outline: '2000px solid rgba(0,0,0,0.45)',
+  }
+
+  const hintText = {
+    marginTop: 8,
+    fontSize: '0.9rem',
+    color: '#ffeb99',
+    textShadow: '0 0 3px rgba(0,0,0,0.7)',
+  }
+
+  const warnText = {
+    marginTop: 8,
+    fontSize: '0.9rem',
+    color: canUpload ? '#c8f7c5' : '#ffb3b3',
+    textShadow: '0 0 3px rgba(0,0,0,0.7)',
   }
 
   return (
@@ -280,9 +313,7 @@ function ChallengeStep1Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Patrick’s Version</strong>
-          </p>
+          <p><strong>Patrick’s Version</strong></p>
           <img
             src="/step1_reference.jpeg"
             alt="Patrick Version Step 1"
@@ -294,25 +325,30 @@ function ChallengeStep1Page() {
             }}
           />
         </div>
-
-        {/* Your Version with portrait frame + oval guide */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Your Version</strong>
-          </p>
+          <p><strong>Your Version</strong></p>
 
-          <div style={frameWrap}>
-            {previewUrl || imageUrl ? (
+          {showImg ? (
+            <div style={overlayFrame}>
               <img
-                src={previewUrl || imageUrl}
+                src={showImg}
                 alt="Your Version"
-                style={frameImage}
+                style={previewImageStyle}
               />
-            ) : (
-              <div style={framePlaceholder}>No image selected yet.</div>
-            )}
-            <div style={ovalOverlay} />
-          </div>
+              {/* Portrait guidance oval */}
+              <div style={ovalMask}>
+                <div style={oval} />
+              </div>
+            </div>
+          ) : (
+            <p>No image selected yet.</p>
+          )}
+
+          <p style={hintText}>
+            Hold your phone in <strong>portrait</strong> and fill the oval with
+            the head and hair.
+          </p>
+          {uploadMessage && <p style={warnText}>{uploadMessage}</p>}
         </div>
       </div>
 
@@ -352,18 +388,12 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Your photo preview is shown above inside the portrait frame.  
+            Your photo preview is shown above.  
             Compare it with Patrick’s version — does it capture the shape, balance, and finish?  
-            <br />
-            <br />
-            Please take the photo in <strong>portrait</strong> so the full head and
-            shoulders fill the oval guide.
-            <br />
-            <br />
-            If this photo represents your <strong>best work</strong>, confirm below to
-            add it to your Style Challenge portfolio and move to Step 2.
-            <br />
-            <br />
+            <br /><br />
+            If this photo represents your <strong>best work</strong>, confirm below to add it to your Style Challenge portfolio 
+            and move to Step 2.  
+            <br /><br />
             Not quite right? Take or choose another photo first.
           </p>
 
@@ -386,8 +416,6 @@ function ChallengeStep1Page() {
           >
             {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
-
-          {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </form>
       )}
 
