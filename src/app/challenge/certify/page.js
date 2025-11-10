@@ -15,7 +15,7 @@ export default function CertifyPage() {
   const origin =
     typeof window !== 'undefined'
       ? window.location.origin
-      : (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000')
+      : process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
   const toText = (val, fallback = 'Unexpected error') => {
     try {
@@ -28,9 +28,9 @@ export default function CertifyPage() {
     }
   }
 
-  const setOk   = (t) => setBanner({ type: 'ok',   text: toText(t) })
+  const setOk = (t) => setBanner({ type: 'ok', text: toText(t) })
   const setWarn = (t) => setBanner({ type: 'warn', text: toText(t) })
-  const setErr  = (t) => setBanner({ type: 'err',  text: toText(t) })
+  const setErr = (t) => setBanner({ type: 'err', text: toText(t) })
 
   async function handleSubmit() {
     setBusy(true)
@@ -39,6 +39,7 @@ export default function CertifyPage() {
     setShowFallback(false)
 
     try {
+      // 1) Get current session
       const { data: sessionData, error: sErr } = await supabase.auth.getSession()
       if (sErr) {
         setErr(sErr.message)
@@ -53,16 +54,39 @@ export default function CertifyPage() {
         return
       }
 
-      // 🔴 IMPORTANT: call /api/review/submit (creates submission + token + email to Patrick)
+      // 2) Load latest uploads per step (1–4) for this stylist
+      const { data: uploadRows, error: uErr } = await supabase
+        .from('uploads')
+        .select('step_number, image_url, created_at')
+        .eq('user_id', uid)
+        .in('step_number', [1, 2, 3, 4])
+        .order('created_at', { ascending: false })
+
+      if (uErr) {
+        console.error('Error loading uploads before review submit:', uErr)
+        setErr('Sorry, we could not read your portfolio images. Please try again.')
+        return
+      }
+
+      // Build latest image map {1,2,3,4} -> image_url
+      const latestImages = {}
+      for (const row of uploadRows || []) {
+        if (!latestImages[row.step_number]) {
+          latestImages[row.step_number] = row.image_url
+        }
+      }
+
+      // 3) Call /api/review/submit (creates submission + token + email to Patrick)
       const res = await fetch('/api/review/submit', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify({
           userId: uid,
           userEmail: email,
+          images: latestImages, // 👈 send latest uploads for steps 1–4
         }),
       })
 
@@ -76,11 +100,13 @@ export default function CertifyPage() {
 
       const token =
         data.token ||
-        new URLSearchParams((data.location || '').split('?')[1] || '').get('token')
+        new URLSearchParams((data.location || '').split('?')[1] || '').get(
+          'token'
+        )
 
-      const link = data.reviewUrl || (token
-        ? `${origin}/review?token=${encodeURIComponent(token)}`
-        : null)
+      const link =
+        data.reviewUrl ||
+        (token ? `${origin}/review?token=${encodeURIComponent(token)}` : null)
 
       if (link) setReviewLink(link)
 
@@ -88,7 +114,9 @@ export default function CertifyPage() {
         if (data.mailer === 'sent') {
           setOk('Submission saved and email sent to Patrick.')
         } else if (data.mailer === 'failed') {
-          setWarn('Submission saved. Email could not be sent automatically — see fallback below.')
+          setWarn(
+            'Submission saved. Email could not be sent automatically — see fallback below.'
+          )
           setShowFallback(true)
         } else {
           setOk('Submission saved.')
@@ -107,8 +135,10 @@ export default function CertifyPage() {
 
   const pill = (t) => ({
     color: t === 'ok' ? '#155724' : t === 'warn' ? '#856404' : '#721c24',
-    background: t === 'ok' ? '#d4edda' : t === 'warn' ? '#fff3cd' : '#f8d7da',
-    borderColor: t === 'ok' ? '#c3e6cb' : t === 'warn' ? '#ffeeba' : '#f5c6cb',
+    background:
+      t === 'ok' ? '#d4edda' : t === 'warn' ? '#fff3cd' : '#f8d7da',
+    borderColor:
+      t === 'ok' ? '#c3e6cb' : t === 'warn' ? '#ffeeba' : '#f5c6cb',
   })
 
   return (
@@ -129,8 +159,9 @@ export default function CertifyPage() {
         </div>
 
         <p style={leadText}>
-          You’ve completed the challenge — now submit your portfolio for review by Patrick Cameron.
-          Approved work earns a <strong>Patrick Cameron Long Hair Specialist</strong> Certificate.
+          You’ve completed the challenge — now submit your portfolio for review by
+          Patrick Cameron. Approved work earns a{' '}
+          <strong>Patrick Cameron Long Hair Specialist</strong> Certificate.
         </p>
 
         <div style={ctaRow}>
@@ -169,7 +200,9 @@ export default function CertifyPage() {
           <div style={fallbackWrap}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
-                onClick={() => reviewLink && navigator.clipboard.writeText(reviewLink)}
+                onClick={() =>
+                  reviewLink && navigator.clipboard.writeText(reviewLink)
+                }
                 disabled={!reviewLink}
                 style={btnGhost}
               >
@@ -177,11 +210,11 @@ export default function CertifyPage() {
               </button>
               <a
                 href={`mailto:info@accesslonghair.com?subject=${encodeURIComponent(
-                  'Style Challenge — Review Request',
+                  'Style Challenge — Review Request'
                 )}&body=${encodeURIComponent(
                   `Hi Patrick,%0D%0A%0D%0APlease review this submission:%0D%0A${
                     reviewLink || '(link pending)'
-                  }%0D%0A%0D%0AAll the best,%0D%0AStyle Challenge`,
+                  }%0D%0A%0D%0AAll the best,%0D%0AStyle Challenge`
                 )}`}
                 style={{ ...btnGhost, textDecoration: 'none' }}
               >
@@ -240,7 +273,12 @@ const leadText = {
   maxWidth: 780,
   lineHeight: 1.35,
 }
-const ctaRow = { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }
+const ctaRow = {
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+  justifyContent: 'center',
+}
 const btn = {
   color: '#fff',
   border: 'none',

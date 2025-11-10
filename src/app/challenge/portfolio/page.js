@@ -195,8 +195,9 @@ export default function PortfolioPage() {
       })
     )
 
+    // 🔵 Slightly taller Finished Look in the PDF only
     if (finishedImgRef.current) {
-      finishedImgRef.current.style.maxHeight = '460px'
+      finishedImgRef.current.style.maxHeight = '640px'
     }
 
     // Measure the *forced* desktop layout for the PDF page size
@@ -570,10 +571,13 @@ const thumbLabel = {
   color: '#5b5b5b',
   marginBottom: 8
 }
+
+// 🔵 Updated: no forced square crop, keep aspect ratio, contain inside card
 const thumbImg = {
   width: '100%',
-  aspectRatio: '1 / 1',
-  objectFit: 'cover',
+  height: 'auto',
+  maxHeight: 260,
+  objectFit: 'contain',
   borderRadius: 12,
   background: '#fff',
   display: 'block',

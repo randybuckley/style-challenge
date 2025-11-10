@@ -43,6 +43,7 @@ function ChallengeStep1Page() {
     setUploadMessage('')
   }
 
+  // Revoke previous object URL to avoid memory leaks
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -53,6 +54,7 @@ function ChallengeStep1Page() {
     e.preventDefault()
     if (uploading) return
 
+    // Demo: allow continue without an upload
     if (adminDemo && !file) {
       setUploadMessage('✅ Demo mode: skipping upload.')
       setShowOptions(true)
@@ -69,6 +71,8 @@ function ChallengeStep1Page() {
       setUploadMessage('Uploading…')
 
       const filePath = makeUploadPath(user.id, 'step1', file)
+
+      // Upload to Storage
       const { data, error } = await supabase.storage
         .from('uploads')
         .upload(filePath, file)
@@ -81,6 +85,7 @@ function ChallengeStep1Page() {
 
       const path = data?.path || filePath
 
+      // Insert DB row (non-demo only)
       if (!adminDemo && user) {
         const { error: dbError } = await supabase
           .from('uploads')
@@ -133,6 +138,7 @@ function ChallengeStep1Page() {
     border: '1px solid #ccc',
     boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
     background: '#000',
+    display: 'block',
   }
 
   const ovalMask = {
@@ -144,13 +150,16 @@ function ChallengeStep1Page() {
     justifyContent: 'center',
   }
 
-  const oval = {
-    width: '70%',
-    height: '65%',
+  // ⬆️ oval made larger here
+    const oval = {
+    width: '88%',
+    height: '78%',
     borderRadius: '50%',
     boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
     outline: '2000px solid rgba(0,0,0,0.45)',
   }
+
+  const hasImage = !!(previewUrl || imageUrl)
 
   return (
     <main
@@ -182,6 +191,33 @@ function ChallengeStep1Page() {
           border: '0.5px solid #666',
         }}
       />
+
+      {/* Step-by-step instructions */}
+      <p
+        style={{
+          marginBottom: '0.75rem',
+          fontSize: '1rem',
+          color: '#ddd',
+        }}
+      >
+        Follow these steps before you take your photo:
+      </p>
+      <ol
+        style={{
+          margin: '0 0 1.5rem',
+          paddingLeft: '1.2rem',
+          textAlign: 'left',
+          color: '#ddd',
+          fontSize: '0.95rem',
+          maxWidth: 520,
+          marginInline: 'auto',
+          lineHeight: 1.5,
+        }}
+      >
+        <li>Watch Patrick’s demo for Step 1.</li>
+        <li>Prepare your mannequin or model so the style matches Patrick’s shape and balance.</li>
+        <li>Position the camera so the head and hair fill the oval frame.</li>
+      </ol>
       <p
         style={{
           marginBottom: '2rem',
@@ -189,9 +225,7 @@ function ChallengeStep1Page() {
           color: '#ddd',
         }}
       >
-        Watch Patrick’s demo and upload your first image when ready.
-        <br /><br />
-        <strong>Important:</strong> Hold your phone <strong>upright (portrait)</strong> 
+        <strong>Important:</strong> Hold your phone <strong>upright (portrait)</strong>{' '}
         and fill the frame with the hairstyle — top to bottom — so it looks great in your portfolio.
       </p>
 
@@ -238,34 +272,56 @@ function ChallengeStep1Page() {
       >
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Patrick’s Version</strong></p>
-          <img
-            src="/step1_reference.jpeg"
-            alt="Patrick Version Step 1"
-            style={{
-              width: '100%',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-            }}
-          />
+          <div style={overlayFrame}>
+            <img
+              src="/style_one/step1_reference.jpeg"
+              alt="Patrick Version Step 1"
+              style={previewImageStyle}
+            />
+          </div>
         </div>
 
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Your Version</strong></p>
-          {previewUrl || imageUrl ? (
-            <div style={overlayFrame}>
+          <div style={overlayFrame}>
+            {hasImage ? (
               <img
                 src={previewUrl || imageUrl}
                 alt="Your Version"
                 style={previewImageStyle}
               />
-              <div style={ovalMask}>
-                <div style={oval}></div>
-              </div>
+            ) : (
+              <div
+                style={{
+                  ...previewImageStyle,
+                  background:
+                    'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
+                }}
+              />
+            )}
+
+            <div style={ovalMask}>
+              <div style={oval} />
             </div>
-          ) : (
-            <p>No image selected yet.</p>
-          )}
+
+            {!hasImage && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 14,
+                  left: 0,
+                  right: 0,
+                  color: '#fff',
+                  fontSize: '0.9rem',
+                  textAlign: 'center',
+                  opacity: 0.9,
+                }}
+              >
+                Hold phone upright — fill the oval
+              </div>
+            )}
+          </div>
+
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
       </div>
@@ -277,13 +333,15 @@ function ChallengeStep1Page() {
             style={{
               display: 'inline-block',
               padding: '0.75rem 1.5rem',
-              backgroundColor: '#000',
-              color: '#fff',
-              borderRadius: '4px',
+              backgroundColor: '#f5f5f5',
+              color: '#000',
+              borderRadius: '999px',
+              border: '2px solid #000',
               fontSize: '1rem',
               cursor: 'pointer',
               textAlign: 'center',
               marginBottom: '0.75rem',
+              fontWeight: 600,
             }}
           >
             📸 Take Photo / Choose Photo (Portrait)
@@ -306,7 +364,7 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Make sure the hairstyle fills the frame in <strong>portrait</strong> 
+            Make sure the hairstyle fills the frame in <strong>portrait</strong>{' '}
             mode, with the head and hair inside the oval.
           </p>
 
