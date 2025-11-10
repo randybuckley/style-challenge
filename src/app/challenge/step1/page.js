@@ -7,9 +7,6 @@ import { supabase } from '../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-const STORAGE_PREFIX =
-  'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
-
 function ChallengeStep1Page() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -25,7 +22,7 @@ function ChallengeStep1Page() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Load session / admin demo flag
+  // Session + admin flag
   useEffect(() => {
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
     setAdminDemo(isAdminDemo)
@@ -41,38 +38,40 @@ function ChallengeStep1Page() {
     })
   }, [router, searchParams])
 
-  // Load most recent Step 1 image (for returning stylists)
+  // When a user is known, try to load their latest saved Step 1 image
   useEffect(() => {
     if (!user || adminDemo) return
 
-    const loadExisting = async () => {
+    let cancelled = false
+
+    const loadLastStep1Image = async () => {
       const { data, error } = await supabase
         .from('uploads')
-        .select('image_url, created_at')
+        .select('image_url')
         .eq('user_id', user.id)
         .eq('step_number', 1)
-        .order('created_at', { ascending: false })
-        .limit(1)
 
       if (error) {
-        console.warn('Error loading existing Step 1 image:', error.message)
+        console.error('Error loading existing Step 1 image:', error.message)
         return
       }
 
-      const row = data?.[0]
-      if (row?.image_url) {
-        const path = row.image_url
-        const fullUrl = path.startsWith('http')
-          ? path
-          : `${STORAGE_PREFIX}${path}`
-
-        setImageUrl(fullUrl)
-        setShowOptions(false)
-        setUploadMessage('')
+      if (!cancelled && data && data.length > 0) {
+        const last = data[data.length - 1]
+        if (last?.image_url) {
+          const fullUrl =
+            `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${last.image_url}`
+          setImageUrl(fullUrl)
+          // keep showOptions = false so they can either confirm or upload a new photo
+        }
       }
     }
 
-    loadExisting()
+    loadLastStep1Image()
+
+    return () => {
+      cancelled = true
+    }
   }, [user, adminDemo])
 
   const handleFileChange = (fileObj) => {
@@ -92,15 +91,30 @@ function ChallengeStep1Page() {
     e.preventDefault()
     if (uploading) return
 
-    // Demo: allow continue without an upload
-    if (adminDemo && !file) {
-      setUploadMessage('✅ Demo mode: skipping upload.')
+    // Demo: allow continue without an upload if an image already exists
+    if (adminDemo && !file && imageUrl) {
+      setUploadMessage('✅ Demo mode: using your existing photo.')
       setShowOptions(true)
       return
     }
 
-    if (!file || !user) {
+    // If there is neither a new file nor an existing saved image, block
+    if (!file && !imageUrl) {
       setUploadMessage('Please select a photo first.')
+      return
+    }
+
+    // If there is no new file but we already have an imageUrl,
+    // just confirm and move on without uploading anything.
+    if (!file && imageUrl) {
+      setUploadMessage('✅ Using your existing photo for Step 1.')
+      setShowOptions(true)
+      return
+    }
+
+    // From here on, we know we have a NEW file to upload
+    if (!user && !adminDemo) {
+      setUploadMessage('There was a problem with your session. Please sign in again.')
       return
     }
 
@@ -136,7 +150,8 @@ function ChallengeStep1Page() {
         }
       }
 
-      const fullUrl = `${STORAGE_PREFIX}${path}`
+      const fullUrl =
+        `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${path}`
       setImageUrl(fullUrl)
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -187,6 +202,7 @@ function ChallengeStep1Page() {
     justifyContent: 'center',
   }
 
+  // ⬆️ oval made larger here
   const oval = {
     width: '88%',
     height: '78%',
@@ -251,10 +267,7 @@ function ChallengeStep1Page() {
         }}
       >
         <li>Watch Patrick’s demo for Step 1.</li>
-        <li>
-          Prepare your mannequin or model so the style matches Patrick’s shape
-          and balance.
-        </li>
+        <li>Prepare your mannequin or model so the style matches Patrick’s shape and balance.</li>
         <li>Position the camera so the head and hair fill the oval frame.</li>
       </ol>
       <p
@@ -264,9 +277,8 @@ function ChallengeStep1Page() {
           color: '#ddd',
         }}
       >
-        <strong>Important:</strong> Hold your phone{' '}
-        <strong>upright (portrait)</strong> and fill the frame with the
-        hairstyle — top to bottom — so it looks great in your portfolio.
+        <strong>Important:</strong> Hold your phone <strong>upright (portrait)</strong>{' '}
+        and fill the frame with the hairstyle — top to bottom — so it looks great in your portfolio.
       </p>
 
       {/* Video */}
@@ -297,9 +309,7 @@ function ChallengeStep1Page() {
       </div>
 
       {/* Compare Section */}
-      <h3
-        style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}
-      >
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
         Compare Your Work
       </h3>
       <div
@@ -313,9 +323,7 @@ function ChallengeStep1Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Patrick’s Version</strong>
-          </p>
+          <p><strong>Patrick’s Version</strong></p>
           <div style={overlayFrame}>
             <img
               src="/style_one/step1_reference.jpeg"
@@ -326,9 +334,7 @@ function ChallengeStep1Page() {
         </div>
 
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Your Version</strong>
-          </p>
+          <p><strong>Your Version</strong></p>
           <div style={overlayFrame}>
             {hasImage ? (
               <img
@@ -431,9 +437,7 @@ function ChallengeStep1Page() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading
-              ? 'Uploading…'
-              : '✅ Confirm, Add to Portfolio & Move to Step 2'}
+            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
@@ -451,14 +455,7 @@ function ChallengeStep1Page() {
             textAlign: 'center',
           }}
         >
-          <h2
-            style={{
-              color: '#28a745',
-              fontSize: '1.5rem',
-              marginBottom: '0.75rem',
-              fontWeight: '700',
-            }}
-          >
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
             🎉 Great work!
           </h2>
           <p
@@ -470,8 +467,8 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Does this image show your <strong>best work</strong> for Step 1? If
-            yes, you’re ready to continue your Style Challenge journey!
+            Does this image show your <strong>best work</strong> for Step 1?  
+            If yes, you’re ready to continue your Style Challenge journey!
           </p>
 
           <button

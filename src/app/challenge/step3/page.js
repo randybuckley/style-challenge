@@ -80,7 +80,7 @@ function ChallengeStep3Inner() {
     setUploadMessage('')
   }
 
-  // Revoke previous object URL to avoid memory leaks
+  // Revoke previous object URL
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -91,15 +91,32 @@ function ChallengeStep3Inner() {
     e.preventDefault()
     if (uploading) return
 
-    // Demo: allow continue without an upload
-    if (adminDemo && !file) {
-      setUploadMessage('✅ Demo mode: skipping upload.')
+    if (adminDemo) {
+      if (!file && imageUrl) {
+        setUploadMessage('✅ Demo mode: using your existing photo.')
+        setShowOptions(true)
+        return
+      }
+      if (!file && !imageUrl) {
+        setUploadMessage('✅ Demo mode: skipping upload.')
+        setShowOptions(true)
+        return
+      }
+    }
+
+    if (!file && !imageUrl && !adminDemo) {
+      setUploadMessage('Please select a file first.')
+      return
+    }
+
+    if (!file && imageUrl && !adminDemo) {
+      setUploadMessage('✅ Using your existing photo for Step 3.')
       setShowOptions(true)
       return
     }
 
-    if (!file && !adminDemo) {
-      setUploadMessage('Please select a file first.')
+    if (!user && !adminDemo) {
+      setUploadMessage('There was a problem with your session. Please sign in again.')
       return
     }
 
@@ -110,7 +127,6 @@ function ChallengeStep3Inner() {
       const userId = user?.id || 'demo-user'
       const filePath = makeUploadPath(userId, 'step3', file)
 
-      // Upload to Storage (only if a real file)
       if (file) {
         const { error: storageError } = await supabase.storage
           .from('uploads')
@@ -123,7 +139,6 @@ function ChallengeStep3Inner() {
         }
       }
 
-      // Insert into DB unless demo
       if (!adminDemo && file && user?.id) {
         const { error: dbError } = await supabase
           .from('uploads')
@@ -162,7 +177,6 @@ function ChallengeStep3Inner() {
 
   if (loading) return <p>Loading challenge step 3…</p>
 
-  // ---- shared overlay styles copied from Step 1 ----
   const overlayFrame = {
     position: 'relative',
     width: '100%',
@@ -210,7 +224,6 @@ function ChallengeStep3Inner() {
         textAlign: 'center',
       }}
     >
-      {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Image
           src="/logo.jpeg"
@@ -240,7 +253,6 @@ function ChallengeStep3Inner() {
         Watch Patrick’s demo for Step&nbsp;3, then capture your final working image.
       </p>
 
-      {/* Video */}
       <div
         style={{
           marginBottom: '2rem',
@@ -267,7 +279,6 @@ function ChallengeStep3Inner() {
         />
       </div>
 
-      {/* Compare */}
       <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
         Compare Your Work
       </h3>
@@ -313,11 +324,9 @@ function ChallengeStep3Inner() {
                 }}
               />
             )}
-
             <div style={ovalMask}>
               <div style={oval} />
             </div>
-
             {!hasImage && (
               <div
                 style={{
@@ -335,12 +344,10 @@ function ChallengeStep3Inner() {
               </div>
             )}
           </div>
-
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
       </div>
 
-      {/* Upload */}
       {!showOptions && !adminDemo && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
           <label
@@ -407,7 +414,6 @@ function ChallengeStep3Inner() {
         </form>
       )}
 
-      {/* After upload */}
       {(showOptions || adminDemo) && (
         <div
           style={{
@@ -484,7 +490,6 @@ function ChallengeStep3Inner() {
   )
 }
 
-// Default export with Suspense wrapper
 export default function ChallengeStep3Page() {
   return (
     <Suspense

@@ -91,15 +91,31 @@ function ChallengeStep2Inner() {
     e.preventDefault()
     if (uploading) return
 
-    // Demo: allow continue without an upload
-    if (adminDemo && !file) {
-      setUploadMessage('✅ Demo mode: skipping upload.')
+    // Demo: allow continue without an upload if an existing image is present
+    if (adminDemo && !file && imageUrl) {
+      setUploadMessage('✅ Demo mode: using your existing photo.')
       setShowOptions(true)
       return
     }
 
-    if (!file) {
+    // If there is neither a new file nor an existing saved image, block
+    if (!file && !imageUrl) {
       setUploadMessage('Please select a file first.')
+      return
+    }
+
+    // If no new file but we already have an existing image, just confirm
+    if (!file && imageUrl) {
+      setUploadMessage('✅ Using your existing photo for Step 2.')
+      setShowOptions(true)
+      return
+    }
+
+    // From here on, we know we have a NEW file to upload
+    if (!user && !adminDemo) {
+      setUploadMessage(
+        'There was a problem with your session. Please sign in again.'
+      )
       return
     }
 
