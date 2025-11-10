@@ -37,10 +37,40 @@ function ChallengeStep1Page() {
     })
   }, [router, searchParams])
 
+  // Enforce portrait orientation + build preview URL
   const handleFileChange = (fileObj) => {
-    setFile(fileObj || null)
-    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
     setUploadMessage('')
+
+    // If user cancels chooser, clear state
+    if (!fileObj) {
+      setFile(null)
+      setPreviewUrl('')
+      return
+    }
+
+    // Inspect image dimensions before accepting it
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        // Require portrait: height >= width
+        if (img.width > img.height) {
+          alert(
+            'Please use portrait orientation (taller than wide).\n\n' +
+              'Hold your phone upright and retake the photo so the full head and shoulders fill the frame.'
+          )
+          setFile(null)
+          setPreviewUrl('')
+          return
+        }
+
+        // Portrait is OK – store file + preview
+        setFile(fileObj)
+        setPreviewUrl(URL.createObjectURL(fileObj))
+      }
+      img.src = ev.target.result
+    }
+    reader.readAsDataURL(fileObj)
   }
 
   // Revoke previous object URL to avoid memory leaks
@@ -120,6 +150,47 @@ function ChallengeStep1Page() {
   }
 
   if (loading) return <p>Loading challenge step 1…</p>
+
+  // Simple shared styles for the portrait frame + oval overlay
+  const frameWrap = {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 260,
+    aspectRatio: '3 / 4', // explicit portrait ratio
+    borderRadius: 12,
+    overflow: 'hidden',
+    background: '#000',
+    border: '1px solid #ccc',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    marginTop: 4,
+  }
+
+  const frameImage = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+  }
+
+  const framePlaceholder = {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#999',
+    fontSize: 13,
+    background: '#222',
+  }
+
+  const ovalOverlay = {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    borderRadius: '50% / 60%',
+    boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)',
+    border: '2px dashed rgba(255,255,255,0.8)',
+  }
 
   return (
     <main
@@ -209,7 +280,9 @@ function ChallengeStep1Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick’s Version</strong></p>
+          <p>
+            <strong>Patrick’s Version</strong>
+          </p>
           <img
             src="/step1_reference.jpeg"
             alt="Patrick Version Step 1"
@@ -221,22 +294,25 @@ function ChallengeStep1Page() {
             }}
           />
         </div>
+
+        {/* Your Version with portrait frame + oval guide */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Version</strong></p>
-          {previewUrl || imageUrl ? (
-            <img
-              src={previewUrl || imageUrl}
-              alt="Your Version"
-              style={{
-                width: '100%',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-              }}
-            />
-          ) : (
-            <p>No image selected yet.</p>
-          )}
+          <p>
+            <strong>Your Version</strong>
+          </p>
+
+          <div style={frameWrap}>
+            {previewUrl || imageUrl ? (
+              <img
+                src={previewUrl || imageUrl}
+                alt="Your Version"
+                style={frameImage}
+              />
+            ) : (
+              <div style={framePlaceholder}>No image selected yet.</div>
+            )}
+            <div style={ovalOverlay} />
+          </div>
         </div>
       </div>
 
@@ -276,12 +352,18 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Your photo preview is shown above.  
+            Your photo preview is shown above inside the portrait frame.  
             Compare it with Patrick’s version — does it capture the shape, balance, and finish?  
-            <br/><br/>
-            If this photo represents your <strong>best work</strong>, confirm below to add it to your Style Challenge portfolio 
-            and move to Step 2.  
-            <br/><br/>
+            <br />
+            <br />
+            Please take the photo in <strong>portrait</strong> so the full head and
+            shoulders fill the oval guide.
+            <br />
+            <br />
+            If this photo represents your <strong>best work</strong>, confirm below to
+            add it to your Style Challenge portfolio and move to Step 2.
+            <br />
+            <br />
             Not quite right? Take or choose another photo first.
           </p>
 
@@ -305,9 +387,7 @@ function ChallengeStep1Page() {
             {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
 
-          {uploadMessage && (
-            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
-          )}
+          {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </form>
       )}
 
