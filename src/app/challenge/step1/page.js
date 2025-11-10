@@ -19,7 +19,7 @@ function ChallengeStep1Page() {
   const [adminDemo, setAdminDemo] = useState(false)
   const [uploading, setUploading] = useState(false)
 
-  // new: simple orientation gate
+  // orientation gate
   const [canUpload, setCanUpload] = useState(true)
 
   const router = useRouter()
@@ -49,37 +49,45 @@ function ChallengeStep1Page() {
       return
     }
 
-    // Always show preview immediately
     const objectUrl = URL.createObjectURL(fileObj)
+
     setFile(fileObj)
     setPreviewUrl(objectUrl)
-    setImageUrl('') // clear any old stored image
-    setUploadMessage('Checking photo…')
-    setCanUpload(true)
+    setImageUrl('')
+    setUploadMessage('Loading photo…')
+    setCanUpload(false) // pessimistic until we know
 
-    // Async orientation check (does NOT block preview)
     const img = new Image()
     img.onload = () => {
       const w = img.naturalWidth || img.width
       const h = img.naturalHeight || img.height
 
       if (!w || !h) {
-        setUploadMessage('Photo loaded. Please ensure the head fills the oval.')
+        setUploadMessage(
+          'Photo loaded. Make sure the head and hair fill the oval, then confirm when you are happy.'
+        )
         setCanUpload(true)
         return
       }
 
-      // Very simple rule: portrait-ish and not ultra-wide
-      const portraitish = h >= w * 0.9
+      const ratio = h / w // >1 = taller than wide
 
-      if (!portraitish) {
+      if (ratio < 1.0) {
+        // clear landscape
         setUploadMessage(
-          'This looks landscape. Please retake in portrait so the head and hair fill the oval.'
+          'This looks LANDSCAPE. Please retake in PORTRAIT so the head and hair fill the oval.'
         )
         setCanUpload(false)
-      } else {
+      } else if (ratio < 1.2) {
+        // almost square
         setUploadMessage(
-          'Looks good. Make sure the head and hair fill the oval, then confirm when you are happy.'
+          'This is almost square. Prefer a tall portrait where the head and hair fill most of the oval.'
+        )
+        setCanUpload(true)
+      } else {
+        // clearly portrait
+        setUploadMessage(
+          'Looks good in portrait. Make sure the head and hair fill the oval, then confirm below.'
         )
         setCanUpload(true)
       }
@@ -114,7 +122,7 @@ function ChallengeStep1Page() {
 
     if (!canUpload && !adminDemo) {
       setUploadMessage(
-        'This photo is not in portrait. Please retake in portrait so the head and hair fill the oval.'
+        'This photo is in landscape. Please retake in portrait so the head and hair fill the oval.'
       )
       return
     }
