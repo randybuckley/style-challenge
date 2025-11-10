@@ -46,7 +46,8 @@ export async function POST(req) {
       firstName: bodyFirst,
       secondName: bodySecond,
       salonName: bodySalon,
-      images = {} // {1,2,3,4} URLs or paths
+      // optional images passed from client – we’ll merge with DB-derived ones
+      images: bodyImages = {}
     } = body || {}
 
     if (!userId) {
@@ -84,7 +85,44 @@ export async function POST(req) {
       )
     }
 
-    // --- Create a fresh review token and submission row ---
+    // ------------------------------------------------------------------
+    // NEW: pull latest step 1–4 uploads from DB if client didn't send URLs
+    // ------------------------------------------------------------------
+    let mergedImages = { ...bodyImages } // preserve any explicit overrides
+
+    const missingSteps = [1, 2, 3, 4].filter(
+      (step) => mergedImages[step] == null
+    )
+
+    if (missingSteps.length > 0) {
+      const { data: rows, error: uploadsErr } = await supabaseAdmin
+        .from('uploads')
+        .select('step_number, image_url, created_at')
+        .eq('user_id', userId)
+        .in('step_number', [1, 2, 3, 4])
+        .order('created_at', { ascending: false })
+
+      if (uploadsErr) {
+        console.error('/api/review/submit: uploads lookup error', uploadsErr)
+      } else if (rows && rows.length) {
+        const latestByStep = {}
+        for (const row of rows) {
+          if (!latestByStep[row.step_number]) {
+            latestByStep[row.step_number] = row.image_url
+          }
+        }
+
+        for (const step of missingSteps) {
+          if (latestByStep[step]) {
+            mergedImages[step] = latestByStep[step]
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Create submission row with whatever images we now have
+    // ------------------------------------------------------------------
     const reviewToken = crypto.randomUUID()
 
     const { error: subErr } = await supabaseAdmin.from('submissions').insert({
@@ -94,10 +132,10 @@ export async function POST(req) {
       second_name: secondName || null,
       salon_name: salonName || null,
       review_token: reviewToken,
-      step1_url: images[1] || null,
-      step2_url: images[2] || null,
-      step3_url: images[3] || null,
-      finished_url: images[4] || null
+      step1_url: mergedImages[1] || null,
+      step2_url: mergedImages[2] || null,
+      step3_url: mergedImages[3] || null,
+      finished_url: mergedImages[4] || null
     })
 
     if (subErr) {
@@ -122,10 +160,10 @@ export async function POST(req) {
         const rejectUrl = `${site}/review/${encodeURIComponent(reviewToken)}`
         const logoUrl = `${site}/logo.jpeg`
 
-        // Build thumbnail cells from the images object
+        // Build thumbnail cells from mergedImages
         const thumbCells = [1, 2, 3, 4]
           .map((step) => {
-            const raw = images?.[step]
+            const raw = mergedImages?.[step]
             const label =
               step === 4 ? 'Finished Look' : `Step ${step}`
 
