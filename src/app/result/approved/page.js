@@ -19,7 +19,7 @@ function ApprovedResultInner() {
     try {
       setDownloading(true)
 
-      // 1) Ask the backend for certificate metadata via POST (matches your API)
+      // 1) Fetch certificate metadata from your API via POST
       const metaRes = await fetch('/api/review-certification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -27,13 +27,18 @@ function ApprovedResultInner() {
       })
 
       if (!metaRes.ok) {
-        console.error('Metadata error:', metaRes.status, await metaRes.text())
-        alert('Sorry, we could not prepare your certificate details.')
+        const text = await metaRes.text().catch(() => '')
+        console.error('Metadata error:', metaRes.status, text)
+
+        alert(
+          `Sorry, we could not prepare your certificate details.\n\n` +
+          `Status: ${metaRes.status}\n` +
+          (text || 'No error body returned.')
+        )
         return
       }
 
       const meta = await metaRes.json()
-      // Expecting: stylistName, salonName, styleName, date, certificateId, fileName? etc.
 
       // 2) Ask the PDF generator to create the certificate
       const pdfRes = await fetch('/api/generate', {
@@ -43,8 +48,14 @@ function ApprovedResultInner() {
       })
 
       if (!pdfRes.ok) {
-        console.error('Certificate PDF error:', pdfRes.status, await pdfRes.text())
-        alert('Sorry, your certificate could not be generated. Please try again.')
+        const text = await pdfRes.text().catch(() => '')
+        console.error('Certificate PDF error:', pdfRes.status, text)
+
+        alert(
+          `Sorry, your certificate could not be generated. Please try again.\n\n` +
+          `Status: ${pdfRes.status}\n` +
+          (text || 'No error body returned.')
+        )
         return
       }
 
@@ -61,7 +72,10 @@ function ApprovedResultInner() {
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Certificate click error:', err)
-      alert('Something went wrong while downloading your certificate.')
+      alert(
+        'Something went wrong while downloading your certificate.\n\n' +
+        String(err?.message || err)
+      )
     } finally {
       setDownloading(false)
     }
@@ -124,7 +138,7 @@ function ApprovedResultInner() {
             margin: '16px 0 18px'
           }}
         >
-          {/* TODO: update to your real Vimeo video ID */}
+          {/* TODO: replace with real Vimeo video */}
           <iframe
             src="https://player.vimeo.com/video/000000000?h=placeholder&title=0&byline=0&portrait=0"
             style={{ border: 0, width: '100%', height: '100%' }}
