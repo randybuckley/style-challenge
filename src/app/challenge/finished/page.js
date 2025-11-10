@@ -144,7 +144,12 @@ function FinishedLookInner() {
         if (!adminDemo && user?.id) {
           const { error: dbError } = await supabase
             .from('uploads')
-            .insert([{ user_id: user.id, step_number: 4, image_url: mannequinPath, type: 'mannequin' }])
+            .insert([{
+              user_id: user.id,
+              step_number: 4,
+              image_url: mannequinPath,
+              type: 'mannequin'
+            }])
           if (dbError) console.warn('DB insert error:', dbError.message)
         }
 
@@ -168,7 +173,12 @@ function FinishedLookInner() {
         if (!adminDemo && user?.id) {
           const { error: dbError } = await supabase
             .from('uploads')
-            .insert([{ user_id: user.id, step_number: 4, image_url: modelPath, type: 'model' }])
+            .insert([{
+              user_id: user.id,
+              step_number: 4,
+              image_url: modelPath,
+              type: 'model'
+            }])
           if (dbError) console.warn('DB insert error:', dbError.message)
         }
 
@@ -202,6 +212,50 @@ function FinishedLookInner() {
 
   if (loading) return <p>Loading Finished Look…</p>
 
+  // --- shared frame + oval styles (match Steps 1–3) ---
+  const overlayFrame = {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 320,
+    margin: '0 auto'
+  }
+
+  const previewImageStyle = {
+    width: '100%',
+    aspectRatio: '3 / 4',
+    objectFit: 'cover',
+    borderRadius: 12,
+    border: '1px solid #ccc',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    background: '#000',
+    display: 'block'
+  }
+
+  const placeholderStyle = {
+    ...previewImageStyle,
+    background: 'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)'
+  }
+
+  const ovalMask = {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  }
+
+  const oval = {
+    width: '88%',
+    height: '78%',
+    borderRadius: '50%',
+    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
+    outline: '2000px solid rgba(0,0,0,0.45)'
+  }
+
+  const hasMannequin = !!mannequinUrl
+  const hasModel = !!modelUrl
+
   return (
     <main
       style={{
@@ -209,7 +263,7 @@ function FinishedLookInner() {
         margin: '0 auto',
         padding: '2rem',
         fontFamily: 'sans-serif',
-        textAlign: 'center',
+        textAlign: 'center'
       }}
     >
       <div style={{ marginBottom: '1.5rem' }}>
@@ -224,12 +278,25 @@ function FinishedLookInner() {
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Finished Look: Show Off Your Best Work</h1>
-      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
-      <p style={{ marginBottom: '2rem', fontSize: '1rem', color: '#ddd', lineHeight: '1.5' }}>
-        This is your final step! Take a moment to capture your <strong>very best work</strong>.
+      <hr
+        style={{
+          width: '50%',
+          margin: '0.5rem auto 1rem auto',
+          border: '0.5px solid #666'
+        }}
+      />
+      <p
+        style={{
+          marginBottom: '2rem',
+          fontSize: '1rem',
+          color: '#ddd',
+          lineHeight: '1.5'
+        }}
+      >
+        This is your final step! Capture your <strong>very best work</strong>.
         <br />
-        A clear mannequin photo completes the challenge, and an optional in-real-life model photo
-        transforms your style into a portfolio piece to impress clients and followers.
+        A clear mannequin photo completes the challenge, and an optional in-real-life model
+        photo turns your style into a powerful portfolio image.
       </p>
 
       {/* Video */}
@@ -238,7 +305,7 @@ function FinishedLookInner() {
           marginBottom: '2rem',
           width: '100%',
           aspectRatio: '16 / 9',
-          position: 'relative',
+          position: 'relative'
         }}
       >
         <iframe
@@ -250,7 +317,7 @@ function FinishedLookInner() {
             width: '100%',
             height: '100%',
             border: '2px solid #555',
-            borderRadius: '6px',
+            borderRadius: '6px'
           }}
           frameBorder="0"
           allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
@@ -259,8 +326,9 @@ function FinishedLookInner() {
         />
       </div>
 
+      {/* Compare section */}
       <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
-        Compare Your Work
+        Compare Your Finished Look
       </h3>
       <div
         style={{
@@ -269,56 +337,113 @@ function FinishedLookInner() {
           flexWrap: 'wrap',
           justifyContent: 'center',
           textAlign: 'center',
-          marginBottom: '2rem',
+          marginBottom: '2rem'
         }}
       >
+        {/* Patrick finished (no oval, just the same frame) */}
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Patrick’s Finished Version</strong></p>
-          <img
-            src="/finished_reference.jpeg"
-            alt="Patrick Finished Reference"
-            style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}
-          />
-        </div>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Mannequin Upload</strong></p>
-          {mannequinUrl ? (
+          <div style={overlayFrame}>
             <img
-              src={mannequinUrl}
-              alt="Mannequin Upload"
-              style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}
+              src="/style_one/finished_reference.jpeg"
+              alt="Patrick Finished Reference"
+              style={previewImageStyle}
             />
-          ) : (
-            <p>No mannequin uploaded yet.</p>
-          )}
+          </div>
         </div>
+
+        {/* Mannequin */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Model Upload (Optional)</strong></p>
-          {modelUrl ? (
-            <img
-              src={modelUrl}
-              alt="Model Upload"
-              style={{ width: '100%', border: '1px solid #ccc', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}
-            />
-          ) : (
-            <p>No model uploaded yet.</p>
-          )}
+          <p><strong>Your Mannequin Photo</strong></p>
+          <div style={overlayFrame}>
+            {hasMannequin ? (
+              <img
+                src={mannequinUrl}
+                alt="Mannequin Upload"
+                style={previewImageStyle}
+              />
+            ) : (
+              <div style={placeholderStyle} />
+            )}
+
+            <div style={ovalMask}>
+              <div style={oval} />
+            </div>
+
+            {!hasMannequin && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 14,
+                  left: 0,
+                  right: 0,
+                  color: '#fff',
+                  fontSize: '0.9rem',
+                  textAlign: 'center',
+                  opacity: 0.9
+                }}
+              >
+                Hold phone upright — fill the oval
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Model */}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <p><strong>Your Model Photo (Optional)</strong></p>
+          <div style={overlayFrame}>
+            {hasModel ? (
+              <img
+                src={modelUrl}
+                alt="Model Upload"
+                style={previewImageStyle}
+              />
+            ) : (
+              <div style={placeholderStyle} />
+            )}
+
+            <div style={ovalMask}>
+              <div style={oval} />
+            </div>
+
+            {!hasModel && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 14,
+                  left: 0,
+                  right: 0,
+                  color: '#fff',
+                  fontSize: '0.9rem',
+                  textAlign: 'center',
+                  opacity: 0.9
+                }}
+              >
+                Optional — hold phone upright and fill the oval
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Upload form */}
       {!showOptions && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
+          {/* Mannequin (required) */}
           <label
             style={{
               display: 'block',
               padding: '0.75rem 1.5rem',
-              backgroundColor: '#000',
-              color: '#fff',
-              borderRadius: '4px',
+              backgroundColor: '#f5f5f5',
+              color: '#000',
+              borderRadius: '999px',
+              border: '2px solid #000',
               fontSize: '1rem',
               cursor: 'pointer',
               textAlign: 'center',
               marginBottom: '0.75rem',
+              fontWeight: 600
             }}
           >
             📸 Take Photo / Choose Photo (Mannequin – Required)
@@ -331,17 +456,20 @@ function FinishedLookInner() {
             />
           </label>
 
+          {/* Model (optional) */}
           <label
             style={{
               display: 'block',
               padding: '0.75rem 1.5rem',
-              backgroundColor: '#000',
-              color: '#fff',
-              borderRadius: '4px',
+              backgroundColor: '#f5f5f5',
+              color: '#000',
+              borderRadius: '999px',
+              border: '2px solid #000',
               fontSize: '1rem',
               cursor: 'pointer',
               textAlign: 'center',
               marginBottom: '1rem',
+              fontWeight: 600
             }}
           >
             📸 Take Photo / Choose Photo (Optional – In-Real-Life Model)
@@ -354,17 +482,23 @@ function FinishedLookInner() {
             />
           </label>
 
-          <p style={{ fontSize: '1rem', color: '#fff', lineHeight: '1.5', marginBottom: '1rem' }}>
-            💡 Make sure this image reflects your <strong>best work</strong> before confirming.
-            A polished upload will make your portfolio shine!
+          <p
+            style={{
+              fontSize: '1rem',
+              color: '#fff',
+              lineHeight: '1.4',
+              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              marginBottom: '1rem'
+            }}
+          >
+            Make sure these images reflect your <strong>best work</strong> before confirming.
           </p>
 
           <button
             type="submit"
             disabled={uploading}
             style={{
-              display: 'block',
-              margin: '0.5rem auto',
+              marginTop: '0.5rem',
               padding: '1rem 2rem',
               backgroundColor: uploading ? '#1c7e33' : '#28a745',
               color: '#fff',
@@ -380,10 +514,13 @@ function FinishedLookInner() {
             {uploading ? 'Uploading…' : '✅ Confirm & Add to Portfolio'}
           </button>
 
-          {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
+          {uploadMessage && (
+            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
+          )}
         </form>
       )}
 
+      {/* After upload */}
       {(showOptions || adminDemo) && (
         <div
           style={{
@@ -392,14 +529,30 @@ function FinishedLookInner() {
             border: '2px solid #28a745',
             borderRadius: '8px',
             background: 'rgba(40, 167, 69, 0.1)',
-            textAlign: 'center',
+            textAlign: 'center'
           }}
         >
-          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+          <h2
+            style={{
+              color: '#28a745',
+              fontSize: '1.5rem',
+              marginBottom: '0.75rem',
+              fontWeight: '700'
+            }}
+          >
             🎉 Finished Look Complete!
           </h2>
-          <p style={{ fontSize: '1.1rem', color: '#fff', lineHeight: '1.5', marginBottom: '1rem' }}>
-            Does this final look represent your <strong>best work</strong>? If yes, share it proudly in your portfolio!
+          <p
+            style={{
+              fontSize: '1.1rem',
+              color: '#fff',
+              lineHeight: '1.5',
+              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              marginBottom: '1rem'
+            }}
+          >
+            Does this final look represent your <strong>best work</strong>?  
+            If yes, you’re ready to view your portfolio.
           </p>
 
           <button
@@ -414,7 +567,7 @@ function FinishedLookInner() {
               marginRight: '1rem',
               cursor: 'pointer',
               fontWeight: '600',
-              minWidth: '200px',
+              minWidth: '200px'
             }}
           >
             ✅ Yes, Add to Portfolio
@@ -432,7 +585,7 @@ function FinishedLookInner() {
                 borderRadius: '6px',
                 cursor: 'pointer',
                 fontWeight: '600',
-                minWidth: '200px',
+                minWidth: '200px'
               }}
             >
               🔁 No, I’ll Upload a Better Pic
@@ -444,7 +597,7 @@ function FinishedLookInner() {
   )
 }
 
-// Suspense wrapper satisfies Next’s requirement for components using useSearchParams()
+// Suspense wrapper for useSearchParams()
 export default function FinishedLookPage() {
   return (
     <Suspense

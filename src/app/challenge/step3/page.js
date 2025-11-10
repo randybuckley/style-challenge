@@ -125,6 +125,44 @@ function ChallengeStep3Inner() {
 
   if (loading) return <p>Loading challenge step 3…</p>
 
+  // ---- shared overlay styles copied from Step 1 ----
+  const overlayFrame = {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 320,
+    margin: '0 auto',
+  }
+
+  const previewImageStyle = {
+    width: '100%',
+    aspectRatio: '3 / 4',
+    objectFit: 'cover',
+    borderRadius: 12,
+    border: '1px solid #ccc',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    background: '#000',
+    display: 'block',
+  }
+
+  const ovalMask = {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }
+
+  const oval = {
+    width: '88%',
+    height: '78%',
+    borderRadius: '50%',
+    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
+    outline: '2000px solid rgba(0,0,0,0.45)',
+  }
+
+  const hasImage = !!(previewUrl || imageUrl)
+
   return (
     <main
       style={{
@@ -162,7 +200,7 @@ function ChallengeStep3Inner() {
           color: '#ddd',
         }}
       >
-        Watch Patrick’s demo and upload your third image when ready.
+        Watch Patrick’s demo for Step&nbsp;3, then capture your final working image.
       </p>
 
       {/* Video */}
@@ -208,32 +246,57 @@ function ChallengeStep3Inner() {
       >
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Patrick’s Version</strong></p>
-          <img
-            src="/step3_reference.jpeg"
-            alt="Patrick Version Step 3"
-            style={{
-              width: '100%',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-            }}
-          />
+          <div style={overlayFrame}>
+            <img
+              src="/style_one/step3_reference.jpeg"
+              alt="Patrick Version Step 3"
+              style={previewImageStyle}
+            />
+          </div>
         </div>
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Your Version</strong></p>
-          {previewUrl || imageUrl ? (
-            <img
-              src={previewUrl || imageUrl}
-              alt="Your Version Step 3"
-              style={{
-                width: '100%',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-              }}
-            />
-          ) : (
-            <p>No image selected yet.</p>
+          <div style={overlayFrame}>
+            {hasImage ? (
+              <img
+                src={previewUrl || imageUrl}
+                alt="Your Version Step 3"
+                style={previewImageStyle}
+              />
+            ) : (
+              <div
+                style={{
+                  ...previewImageStyle,
+                  background:
+                    'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
+                }}
+              />
+            )}
+
+            <div style={ovalMask}>
+              <div style={oval} />
+            </div>
+
+            {!hasImage && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 14,
+                  left: 0,
+                  right: 0,
+                  color: '#fff',
+                  fontSize: '0.9rem',
+                  textAlign: 'center',
+                  opacity: 0.9,
+                }}
+              >
+                Hold phone upright — fill the oval
+              </div>
+            )}
+          </div>
+
+          {uploadMessage && (
+            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
           )}
         </div>
       </div>
@@ -245,16 +308,18 @@ function ChallengeStep3Inner() {
             style={{
               display: 'inline-block',
               padding: '0.75rem 1.5rem',
-              backgroundColor: '#000',
-              color: '#fff',
-              borderRadius: '4px',
+              backgroundColor: '#f5f5f5',
+              color: '#000',
+              borderRadius: '999px',
+              border: '2px solid #000',
               fontSize: '1rem',
               cursor: 'pointer',
               textAlign: 'center',
               marginBottom: '0.75rem',
+              fontWeight: 600,
             }}
           >
-            📸 Take Photo / Choose Photo
+            📸 Take Photo / Choose Photo (Portrait)
             <input
               type="file"
               accept="image/*"
@@ -274,10 +339,8 @@ function ChallengeStep3Inner() {
               marginBottom: '1rem',
             }}
           >
-            Your photo preview is shown above.  
-            Compare it carefully with Patrick’s version — are the finishing details polished?  
-            <br/><br/>
-            Only confirm if this image shows your <strong>best work</strong>.
+            Your photo preview is shown above. Compare carefully with Patrick’s
+            version and only confirm if this image shows your <strong>best work</strong>.
           </p>
 
           <button
@@ -301,10 +364,6 @@ function ChallengeStep3Inner() {
               ? 'Uploading…'
               : '✅ Confirm, Add to Portfolio & Go to Finished Look'}
           </button>
-
-          {uploadMessage && (
-            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
-          )}
         </form>
       )}
 
@@ -340,7 +399,7 @@ function ChallengeStep3Inner() {
             }}
           >
             Does this final step show your <strong>best work</strong>?  
-            If yes, you’re ready to finish strong with the Completed Look!
+            If yes, you’re ready to finish strong with the Completed Look.
           </p>
 
           <button
@@ -385,7 +444,7 @@ function ChallengeStep3Inner() {
   )
 }
 
-// Default export with Suspense wrapper to satisfy Next’s requirement
+// Default export with Suspense wrapper
 export default function ChallengeStep3Page() {
   return (
     <Suspense
