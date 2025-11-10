@@ -2,9 +2,9 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 
-export default function ApprovedResultPage() {
+function ApprovedResultInner() {
   const searchParams = useSearchParams()
 
   const token = searchParams.get('token') || ''
@@ -221,5 +221,31 @@ export default function ApprovedResultPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+// Suspense wrapper so useSearchParams is allowed during prerender
+export default function ApprovedResultPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: '100vh',
+            background: '#111',
+            color: '#ccc',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily:
+              'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+          }}
+        >
+          Loading…
+        </main>
+      }
+    >
+      <ApprovedResultInner />
+    </Suspense>
   )
 }
