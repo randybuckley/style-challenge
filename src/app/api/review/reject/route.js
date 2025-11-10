@@ -45,7 +45,7 @@ export async function POST(req) {
       )
     }
 
-    // 🔵 NEW: look up submission by review_token on the submissions table
+    // Look up submission by review_token on the submissions table
     let toEmail = ''
 
     const { data: submission, error: lookupError } = await supabase
@@ -66,7 +66,7 @@ export async function POST(req) {
       toEmail = safe(submission.email)
     }
 
-    // fallback if for some reason email wasn’t stored but we got one from the client
+    // Fallback if for some reason email wasn’t stored but we got one from the client
     if (!toEmail && providedEmail) {
       toEmail = providedEmail
     }
@@ -93,8 +93,8 @@ export async function POST(req) {
         <p>Your portfolio was reviewed but needs a little more work before approval.</p>
         ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
         ${notes ? `<p><strong>Feedback:</strong><br>${notes.replace(/\n/g, '<br>')}</p>` : ''}
-        <p>You can update your images here:
-          <a href="${origin}/challenge/portfolio">${host}/challenge/portfolio</a>
+        <p>You can update your images starting from Step 1 here:
+          <a href="${origin}/challenge/step1">${host}/challenge/step1</a>
         </p>
         <p>All the best,<br>Patrick</p>
       </div>

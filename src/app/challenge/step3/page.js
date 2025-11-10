@@ -6,6 +6,9 @@ import { supabase } from '../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+const STORAGE_PREFIX =
+  'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+
 function ChallengeStep3Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -21,6 +24,7 @@ function ChallengeStep3Inner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Session / admin-demo
   useEffect(() => {
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
     setAdminDemo(isAdminDemo)
@@ -35,6 +39,40 @@ function ChallengeStep3Inner() {
       setLoading(false)
     })
   }, [router, searchParams])
+
+  // Load most recent Step 3 image for this user (if any)
+  useEffect(() => {
+    if (!user || adminDemo) return
+
+    const loadExisting = async () => {
+      const { data, error } = await supabase
+        .from('uploads')
+        .select('image_url, created_at')
+        .eq('user_id', user.id)
+        .eq('step_number', 3)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (error) {
+        console.warn('Error loading existing Step 3 image:', error.message)
+        return
+      }
+
+      const row = data?.[0]
+      if (row?.image_url) {
+        const path = row.image_url
+        const fullUrl = path.startsWith('http')
+          ? path
+          : `${STORAGE_PREFIX}${path}`
+
+        setImageUrl(fullUrl)
+        setShowOptions(false)
+        setUploadMessage('')
+      }
+    }
+
+    loadExisting()
+  }, [user, adminDemo])
 
   const handleFileChange = (fileObj) => {
     setFile(fileObj || null)
@@ -99,8 +137,7 @@ function ChallengeStep3Inner() {
       }
 
       if (file) {
-        const fullUrl =
-          `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
+        const fullUrl = `${STORAGE_PREFIX}${filePath}`
         setImageUrl(fullUrl)
       }
 
@@ -139,7 +176,7 @@ function ChallengeStep3Inner() {
     objectFit: 'cover',
     borderRadius: 12,
     border: '1px solid #ccc',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
     background: '#000',
     display: 'block',
   }
@@ -157,8 +194,8 @@ function ChallengeStep3Inner() {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
-    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
-    outline: '2000px solid rgba(0,0,0,0.45)',
+    boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
+    outline: '2000px solid rgba(0, 0, 0, 0.45)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -245,7 +282,9 @@ function ChallengeStep3Inner() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick’s Version</strong></p>
+          <p>
+            <strong>Patrick’s Version</strong>
+          </p>
           <div style={overlayFrame}>
             <img
               src="/style_one/step3_reference.jpeg"
@@ -255,7 +294,9 @@ function ChallengeStep3Inner() {
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Version</strong></p>
+          <p>
+            <strong>Your Version</strong>
+          </p>
           <div style={overlayFrame}>
             {hasImage ? (
               <img
@@ -295,9 +336,7 @@ function ChallengeStep3Inner() {
             )}
           </div>
 
-          {uploadMessage && (
-            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
-          )}
+          {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
       </div>
 
@@ -335,12 +374,13 @@ function ChallengeStep3Inner() {
               fontSize: '1rem',
               color: '#fff',
               lineHeight: '1.4',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
               marginBottom: '1rem',
             }}
           >
             Your photo preview is shown above. Compare carefully with Patrick’s
-            version and only confirm if this image shows your <strong>best work</strong>.
+            version and only confirm if this image shows your{' '}
+            <strong>best work</strong>.
           </p>
 
           <button
@@ -394,12 +434,12 @@ function ChallengeStep3Inner() {
               fontSize: '1.1rem',
               color: '#fff',
               lineHeight: '1.5',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
               marginBottom: '1rem',
             }}
           >
-            Does this final step show your <strong>best work</strong>?  
-            If yes, you’re ready to finish strong with the Completed Look.
+            Does this final step show your <strong>best work</strong>? If yes,
+            you’re ready to finish strong with the Completed Look.
           </p>
 
           <button

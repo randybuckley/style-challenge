@@ -6,6 +6,9 @@ import { supabase } from '../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+const STORAGE_PREFIX =
+  'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+
 function ChallengeStep2Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -21,6 +24,7 @@ function ChallengeStep2Inner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Load session / admin-demo flag
   useEffect(() => {
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
     setAdminDemo(isAdminDemo)
@@ -35,6 +39,40 @@ function ChallengeStep2Inner() {
       setLoading(false)
     })
   }, [router, searchParams])
+
+  // Load most recent Step 2 image for this user (if any)
+  useEffect(() => {
+    if (!user || adminDemo) return
+
+    const loadExisting = async () => {
+      const { data, error } = await supabase
+        .from('uploads')
+        .select('image_url, created_at')
+        .eq('user_id', user.id)
+        .eq('step_number', 2)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (error) {
+        console.warn('Error loading existing Step 2 image:', error.message)
+        return
+      }
+
+      const row = data?.[0]
+      if (row?.image_url) {
+        const path = row.image_url
+        const fullUrl = path.startsWith('http')
+          ? path
+          : `${STORAGE_PREFIX}${path}`
+
+        setImageUrl(fullUrl)
+        setShowOptions(false)
+        setUploadMessage('')
+      }
+    }
+
+    loadExisting()
+  }, [user, adminDemo])
 
   const handleFileChange = (fileObj) => {
     setFile(fileObj || null)
@@ -96,8 +134,7 @@ function ChallengeStep2Inner() {
         }
       }
 
-      const fullUrl =
-        `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
+      const fullUrl = `${STORAGE_PREFIX}${filePath}`
       setImageUrl(fullUrl)
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -134,7 +171,7 @@ function ChallengeStep2Inner() {
     objectFit: 'cover',
     borderRadius: 12,
     border: '1px solid #ccc',
-    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
     background: '#000',
     display: 'block',
   }
@@ -152,8 +189,8 @@ function ChallengeStep2Inner() {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
-    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
-    outline: '2000px solid rgba(0,0,0,0.45)',
+    boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
+    outline: '2000px solid rgba(0, 0, 0, 0.45)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -268,7 +305,9 @@ function ChallengeStep2Inner() {
       >
         {/* Patrick */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick’s Version</strong></p>
+          <p>
+            <strong>Patrick’s Version</strong>
+          </p>
           <div style={overlayFrame}>
             <img
               src="/style_one/step2_reference.jpeg"
@@ -280,7 +319,9 @@ function ChallengeStep2Inner() {
 
         {/* Your Version */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Version</strong></p>
+          <p>
+            <strong>Your Version</strong>
+          </p>
           <div style={overlayFrame}>
             {hasImage ? (
               <img
@@ -358,7 +399,7 @@ function ChallengeStep2Inner() {
               fontSize: '1rem',
               color: '#fff',
               lineHeight: '1.4',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
               marginBottom: '1rem',
             }}
           >
@@ -383,7 +424,9 @@ function ChallengeStep2Inner() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 3'}
+            {uploading
+              ? 'Uploading…'
+              : '✅ Confirm, Add to Portfolio & Move to Step 3'}
           </button>
         </form>
       )}
@@ -414,12 +457,12 @@ function ChallengeStep2Inner() {
               fontSize: '1.1rem',
               color: '#fff',
               lineHeight: '1.5',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
               marginBottom: '1rem',
             }}
           >
-            Does this image show your <strong>best work</strong> for Step 2?
-            If yes, you’re ready to move on to Step 3.
+            Does this image show your <strong>best work</strong> for Step 2? If
+            yes, you’re ready to move on to Step 3.
           </p>
 
           <button
