@@ -19,19 +19,21 @@ function ApprovedResultInner() {
     try {
       setDownloading(true)
 
-      // 1) Get certificate meta (name, salon, style, date, id)
-      const metaRes = await fetch(
-        `/api/review-certification?token=${encodeURIComponent(token)}`
-      )
+      // 1) Ask the backend for certificate metadata via POST (matches your API)
+      const metaRes = await fetch('/api/review-certification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      })
 
       if (!metaRes.ok) {
-        console.error('Metadata error:', await metaRes.text())
+        console.error('Metadata error:', metaRes.status, await metaRes.text())
         alert('Sorry, we could not prepare your certificate details.')
         return
       }
 
       const meta = await metaRes.json()
-      // meta should contain: stylistName, salonName, styleName, date, certificateId
+      // Expecting: stylistName, salonName, styleName, date, certificateId, fileName? etc.
 
       // 2) Ask the PDF generator to create the certificate
       const pdfRes = await fetch('/api/generate', {
@@ -41,7 +43,7 @@ function ApprovedResultInner() {
       })
 
       if (!pdfRes.ok) {
-        console.error('Certificate PDF error:', await pdfRes.text())
+        console.error('Certificate PDF error:', pdfRes.status, await pdfRes.text())
         alert('Sorry, your certificate could not be generated. Please try again.')
         return
       }
@@ -122,7 +124,7 @@ function ApprovedResultInner() {
             margin: '16px 0 18px'
           }}
         >
-          {/* Patrick’s message – replace Vimeo ID when ready */}
+          {/* TODO: update to your real Vimeo video ID */}
           <iframe
             src="https://player.vimeo.com/video/000000000?h=placeholder&title=0&byline=0&portrait=0"
             style={{ border: 0, width: '100%', height: '100%' }}
@@ -178,7 +180,6 @@ function ApprovedResultInner() {
   )
 }
 
-// Wrap the search-params client component in Suspense for Next.js 15
 export default function ApprovedResultPage() {
   return (
     <Suspense
