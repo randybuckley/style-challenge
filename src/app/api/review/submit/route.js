@@ -1,202 +1,297 @@
 // src/app/api/review/submit/route.js
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import sgMail from '@sendgrid/mail'
 import crypto from 'crypto'
-import { supabaseAdmin } from '../../../../lib/supabaseAdmin'
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+// --- Supabase admin client (service role) ---
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-const PUBLIC_UPLOADS_PREFIX = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/uploads/`
+const supabaseAdmin =
+  SUPABASE_URL && SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    : null
 
-function toPublicUrl(urlOrPath = '') {
-  if (!urlOrPath) return ''
-  if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath
-  // handle things like "7515.../step1-...jpg"
-  return PUBLIC_UPLOADS_PREFIX.replace(/\/+$/, '/') + urlOrPath.replace(/^\/+/, '')
+// --- SendGrid setup ---
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || ''
+const SENDGRID_FROM =
+  process.env.SENDGRID_FROM ||
+  process.env.EMAIL_FROM ||
+  'no-reply@accesslonghair.com'
+const REVIEW_RECIPIENT =
+  process.env.REVIEW_RECIPIENT || 'info@accesslonghair.com'
+
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY)
 }
 
-// Convert Supabase object URL to render endpoint (JPEG, sane size) for emails
-function toRenderedJpeg(url) {
-  try {
-    const u = new URL(url)
-    if (u.pathname.includes('/storage/v1/object/public/')) {
-      const pathAfterPublic = u.pathname.split('/storage/v1/object/public/')[1]
-      const render = new URL(u.origin + '/storage/v1/render/image/public/' + pathAfterPublic)
-      render.searchParams.set('width', '1200')
-      render.searchParams.set('quality', '85')
-      render.searchParams.set('resize', 'contain')
-      render.searchParams.set('format', 'jpeg')
-      return render.toString()
-    }
-  } catch {}
-  return url
-}
-
-async function fetchAsBase64(url) {
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`)
-  const mime = (res.headers.get('content-type') || '').split(';')[0].trim() || 'image/jpeg'
-  const buf = Buffer.from(await res.arrayBuffer())
-  return { base64: buf.toString('base64'), mime }
-}
-
-function escapeHtml(s = '') {
-  return s.replace(
-    /[&<>"']/g,
-    c => ({ '&': '&amp;', '<': '&gt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c)
-  )
+function safe(v) {
+  return v == null ? '' : String(v)
 }
 
 export async function POST(req) {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin
-    const {
-      userId,
-      userEmail,
-      firstName = '',
-      secondName = '',
-      images = {} // {1:urlOrPath,2:urlOrPath,3:urlOrPath,4:urlOrPath}
-    } = (await req.json()) || {}
-
-    if (!userId || !userEmail) {
+    if (!supabaseAdmin) {
       return NextResponse.json(
-        { ok: false, error: 'Missing userId or userEmail' },
-        { status: 400 }
-      )
-    }
-
-    // Normalize -> absolute URLs -> rendered JPEG
-    const normalized = {}
-    for (const n of [1, 2, 3, 4]) {
-      const src = images[n]
-      if (!src) continue
-      const full = toRenderedJpeg(toPublicUrl(src))
-      normalized[n] = full
-    }
-
-    // Prepare inline attachments
-    const cids = {}
-    const attachments = []
-    for (const n of [1, 2, 3, 4]) {
-      const url = normalized[n]
-      if (!url) continue
-      const { base64, mime } = await fetchAsBase64(url)
-      const cid = n === 4 ? 'finished' : `step${n}`
-      cids[n] = cid
-      attachments.push({
-        content: base64,
-        filename: `${cid}.jpg`,
-        type: mime || 'image/jpeg',
-        disposition: 'inline',
-        content_id: cid
-      })
-    }
-
-    // Inline logo
-    let logoCid = null
-    try {
-      const { base64, mime } = await fetchAsBase64(`${baseUrl}/logo.jpeg`)
-      logoCid = 'logo'
-      attachments.push({
-        content: base64,
-        filename: 'logo.jpg',
-        type: mime || 'image/jpeg',
-        disposition: 'inline',
-        content_id: logoCid
-      })
-    } catch {}
-
-    // Token for reviewer actions
-    const token = crypto.randomUUID().replace(/-/g, '')
-    const approveUrl = `${baseUrl}/api/review/decision?token=${token}&action=approve&ue=${encodeURIComponent(
-      userEmail
-    )}`
-    const rejectUrl = `${baseUrl}/review/${token}`
-
-    // 🔹 Store the token in Supabase so later routes can find it
-    const { error: tokenError } = await supabaseAdmin.from('review_tokens').insert({
-      token,
-      user_id: userId,
-      user_email: userEmail,
-      first_name: firstName || null,
-      second_name: secondName || null
-      // add salon_name here if you later include it in the request body
-      // salon_name: salonName || null,
-    })
-
-    if (tokenError) {
-      console.error('review_tokens insert error', tokenError)
-      return NextResponse.json(
-        { ok: false, error: 'Failed to create review token' },
+        { ok: false, error: 'Supabase admin client not configured' },
         { status: 500 }
       )
     }
 
-    const stylist = [firstName, secondName].filter(Boolean).join(' ') || userEmail
+    const body = await req.json().catch(() => ({}))
+    const {
+      userId,
+      userEmail: bodyEmail,
+      firstName: bodyFirst,
+      secondName: bodySecond,
+      salonName: bodySalon,
+      images = {} // {1,2,3,4} URLs or paths
+    } = body || {}
 
-    const imgBlock = [1, 2, 3, 4]
-      .map(n => {
-        const label = n === 4 ? 'Finished Look' : `Step ${n}`
-        const cid = cids[n]
-        return cid
-          ? `
-          <div style="margin:12px 0;">
-            <div style="font-size:13px;color:#666;margin-bottom:6px;">${escapeHtml(
-              label
-            )}</div>
-            <img src="cid:${cid}" alt="${escapeHtml(
-              label
-            )}"
-                 style="display:block;border-radius:10px;border:1px solid #eee;max-width:480px;width:100%;height:auto;">
-          </div>`
-          : ''
-      })
-      .join('')
+    if (!userId) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing userId' },
+        { status: 400 }
+      )
+    }
 
-    const logoImg = logoCid
-      ? `<img src="cid:${logoCid}" alt="Style Challenge"
-              style="width:140px;height:auto;border-radius:12px;display:block;margin:0 auto 10px;">`
-      : ''
+    // Base URL for links & logo
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin
+    const site = baseUrl.replace(/\/+$/, '')
 
-    const html = `
-      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;line-height:1.45;">
-        <div style="text-align:center;margin:6px 0 12px;">${logoImg}</div>
-        <h2 style="text-align:center;margin:0 0 10px;">New Style Challenge submission</h2>
-        <p style="text-align:center;margin:0 0 14px;">
-          Stylist: <strong>${escapeHtml(stylist)}</strong><br>
-          Email: <a href="mailto:${escapeHtml(userEmail)}">${escapeHtml(userEmail)}</a>
-        </p>
-        ${imgBlock}
-        <div style="margin-top:16px;">
-          <a href="${approveUrl}"
-             style="display:inline-block;background:#28a745;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;margin-right:10px;">
-             Approve
-          </a>
-          <a href="${rejectUrl}"
-             style="display:inline-block;background:#dc3545;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;">
-             Reject
-          </a>
-        </div>
-        <p style="margin-top:18px">All the best,<br>Patrick</p>
-        ${logoImg}
-      </div>
-    `
+    // --- Look up profile to fill in blanks ---
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, first_name, second_name, salon_name')
+      .eq('id', userId)
+      .maybeSingle()
 
-    await sgMail.send({
-      to: process.env.REVIEW_RECIPIENT || 'info@accesslonghair.com',
-      from: process.env.EMAIL_FROM || process.env.SENDGRID_FROM,
-      replyTo: userEmail,
-      subject: `Style Challenge submission — ${stylist}`,
-      html,
-      attachments // <- forces multipart/related with inline CIDs
+    if (profileErr) {
+      console.error('/api/review/submit: profile lookup error', profileErr)
+    }
+
+    const userEmail = bodyEmail || profile?.email
+    const firstName = bodyFirst ?? profile?.first_name ?? ''
+    const secondName = bodySecond ?? profile?.second_name ?? ''
+    const salonName = bodySalon ?? profile?.salon_name ?? ''
+
+    if (!userEmail) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing user email' },
+        { status: 400 }
+      )
+    }
+
+    // --- Create a fresh review token and submission row ---
+    const reviewToken = crypto.randomUUID()
+
+    const { error: subErr } = await supabaseAdmin.from('submissions').insert({
+      user_id: userId,
+      email: userEmail,
+      first_name: firstName || null,
+      second_name: secondName || null,
+      salon_name: salonName || null,
+      review_token: reviewToken,
+      step1_url: images[1] || null,
+      step2_url: images[2] || null,
+      step3_url: images[3] || null,
+      finished_url: images[4] || null
     })
 
-    return NextResponse.json({ ok: true, token })
+    if (subErr) {
+      console.error('/api/review/submit: insert submissions error', subErr)
+      return NextResponse.json(
+        { ok: false, error: `Could not save submission: ${subErr.message}` },
+        { status: 500 }
+      )
+    }
+
+    // --- Prepare Patrick's email with Approve / Reject links + thumbs ---
+    let mailer = 'skipped'
+
+    if (SENDGRID_API_KEY) {
+      try {
+        const stylist =
+          [firstName, secondName].filter(Boolean).join(' ') || userEmail
+
+        const approveUrl = `${site}/api/review/decision?action=approve&token=${encodeURIComponent(
+          reviewToken
+        )}&userEmail=${encodeURIComponent(userEmail)}`
+        const rejectUrl = `${site}/review/${encodeURIComponent(reviewToken)}`
+        const logoUrl = `${site}/logo.jpeg`
+
+        // Build thumbnail cells from the images object
+        const thumbCells = [1, 2, 3, 4]
+          .map((step) => {
+            const raw = images?.[step]
+            const label =
+              step === 4 ? 'Finished Look' : `Step ${step}`
+
+            if (!raw) {
+              // placeholder tile if no image
+              return `
+                <td align="center" style="padding:4px 6px;font-size:12px;color:#777;">
+                  <div style="margin-bottom:4px;font-weight:600;">${label}</div>
+                  <div style="
+                    width:96px;
+                    height:96px;
+                    border-radius:10px;
+                    border:1px dashed #d1d5db;
+                    background:#f9fafb;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    color:#9ca3af;
+                    font-size:11px;
+                  ">
+                    No image
+                  </div>
+                </td>
+              `
+            }
+
+            let src = String(raw)
+            // If it's just a storage path, prefix with Supabase public URL
+            if (!/^https?:\/\//i.test(src) && SUPABASE_URL) {
+              const baseSupabase = SUPABASE_URL.replace(/\/+$/, '')
+              src = `${baseSupabase}/storage/v1/object/public/uploads/${src}`
+            }
+
+            return `
+              <td align="center" style="padding:4px 6px;font-size:12px;color:#555;">
+                <div style="margin-bottom:4px;font-weight:600;">${label}</div>
+                <img
+                  src="${src}"
+                  alt="${label}"
+                  width="96"
+                  style="
+                    display:block;
+                    width:96px;
+                    height:96px;
+                    object-fit:cover;
+                    border-radius:10px;
+                    border:1px solid #e5e7eb;
+                  "
+                />
+              </td>
+            `
+          })
+          .join('')
+
+        const html = `
+          <div style="background:#f7f7f8;padding:24px 0;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                   style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;">
+              <tr>
+                <td align="center">
+                  <table role="presentation" width="600" cellspacing="0" cellpadding="0"
+                         style="background:#ffffff;border:1px solid #eee;border-radius:12px;overflow:hidden">
+                    <tr>
+                      <td align="center" style="padding:22px 22px 10px">
+                        <img src="${logoUrl}" width="160" height="auto"
+                             alt="Patrick Cameron – Style Challenge"
+                             style="display:block;border:0;outline:none;text-decoration:none" />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:4px 22px 10px">
+                        <h2 style="margin:0 0 8px;font-size:20px;line-height:1.35">
+                          New Style Challenge submission
+                        </h2>
+                        <p style="margin:0 0 4px;font-size:15px;line-height:1.6">
+                          Stylist: <strong>${safe(stylist)}</strong>
+                        </p>
+                        ${
+                          salonName
+                            ? `<p style="margin:0 0 4px;font-size:14px;line-height:1.6">
+                                 Salon: ${safe(salonName)}
+                               </p>`
+                            : ''
+                        }
+                        <p style="margin:0 0 10px;font-size:14px;line-height:1.6">
+                          Email: <a href="mailto:${safe(userEmail)}">${safe(
+          userEmail
+        )}</a>
+                        </p>
+                      </td>
+                    </tr>
+
+                    <!-- thumbnails row -->
+                    <tr>
+                      <td style="padding:4px 22px 4px;">
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                          <tr>
+                            ${thumbCells}
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding:10px 22px 18px">
+                        <div style="margin:10px 0 0;">
+                          <a href="${approveUrl}"
+                             style="display:inline-block;background:#28a745;color:#fff;
+                                    text-decoration:none;padding:10px 14px;border-radius:8px;
+                                    font-weight:700;margin-right:10px;">
+                            Approve
+                          </a>
+                          <a href="${rejectUrl}"
+                             style="display:inline-block;background:#dc3545;color:#fff;
+                                    text-decoration:none;padding:10px 14px;border-radius:8px;
+                                    font-weight:700;">
+                            Reject
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:8px 22px 22px;color:#888;font-size:12px">
+                        © ${new Date().getFullYear()} Patrick Cameron Team
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </div>
+        `
+
+        await sgMail.send({
+          to: REVIEW_RECIPIENT,
+          from: SENDGRID_FROM,
+          replyTo: userEmail,
+          subject: `Style Challenge submission — ${safe(
+            [firstName, secondName].filter(Boolean).join(' ') || userEmail
+          )}`,
+          html
+        })
+
+        mailer = 'sent'
+      } catch (mailErr) {
+        console.error('/api/review/submit: mail send error', mailErr)
+        mailer = 'failed'
+      }
+    }
+
+    return NextResponse.json(
+      { ok: true, token: reviewToken, mailer },
+      { status: 200 }
+    )
   } catch (err) {
-    console.error('/api/review/submit', err)
+    console.error('/api/review/submit: unexpected error', err)
     return NextResponse.json(
       { ok: false, error: String(err?.message || err) },
       { status: 500 }
     )
   }
 }
+
+// Guard other HTTP methods
+export function GET() {
+  return new NextResponse('Method Not Allowed', { status: 405 })
+}
+export const PUT = GET
+export const DELETE = GET

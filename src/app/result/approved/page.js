@@ -1,220 +1,225 @@
+// src/app/result/approved/page.js
 'use client'
 
-import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { useState } from 'react'
 
-function ApprovedResultInner() {
+export default function ApprovedResultPage() {
   const searchParams = useSearchParams()
+
   const token = searchParams.get('token') || ''
+  const userEmail = searchParams.get('userEmail') || ''
 
-  const [downloading, setDownloading] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const handleCertificateClick = async (e) => {
-    e.preventDefault()
+  async function handleCertificateClick() {
     if (!token) {
-      alert('Sorry, this link is missing a review token.')
+      alert('Sorry, we could not find your approval token.')
+      return
+    }
+    if (!userEmail) {
+      alert('Sorry, we are missing your email address for this certificate link.')
       return
     }
 
+    setBusy(true)
     try {
-      setDownloading(true)
-
-      // 1) Fetch certificate metadata from your API via POST
+      //
+      // 1) Fetch certificate metadata from our API
+      //
       const metaRes = await fetch('/api/review-certification', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token })
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ token, userEmail }),
       })
 
       if (!metaRes.ok) {
         const text = await metaRes.text().catch(() => '')
         console.error('Metadata error:', metaRes.status, text)
-
         alert(
-          `Sorry, we could not prepare your certificate details.\n\n` +
-          `Status: ${metaRes.status}\n` +
-          (text || 'No error body returned.')
+          'Sorry, we could not prepare your certificate details.\n\n' +
+          (text || `Status: ${metaRes.status}`)
         )
         return
       }
 
       const meta = await metaRes.json()
+      if (!meta || meta.ok === false) {
+        console.error('Metadata payload error:', meta)
+        alert(
+          'Sorry, we could not prepare your certificate details.\n\n' +
+          (meta?.error || 'Unknown metadata error')
+        )
+        return
+      }
 
-      // 2) Ask the PDF generator to create the certificate
+      //
+      // 2) Ask the server to generate the PDF
+      //
       const pdfRes = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(meta)
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/pdf',
+        },
+        body: JSON.stringify(meta),
       })
 
       if (!pdfRes.ok) {
         const text = await pdfRes.text().catch(() => '')
-        console.error('Certificate PDF error:', pdfRes.status, text)
-
+        console.error('PDF generation error:', pdfRes.status, text)
         alert(
-          `Sorry, your certificate could not be generated. Please try again.\n\n` +
-          `Status: ${pdfRes.status}\n` +
-          (text || 'No error body returned.')
+          'Sorry, there was a problem generating your certificate PDF.\n\n' +
+          (text || `Status: ${pdfRes.status}`)
         )
         return
       }
 
       const blob = await pdfRes.blob()
       const url = URL.createObjectURL(blob)
+
+      const stylistSlug = (meta.stylistName || 'Stylist')
+        .replace(/\s+/g, '_')
+        .replace(/[^A-Za-z0-9_]/g, '')
+
+      const styleSlug = (meta.styleName || 'Challenge')
+        .replace(/\s+/g, '_')
+        .replace(/[^A-Za-z0-9_]/g, '')
+
+      const filename = `Certificate_${stylistSlug}_${styleSlug}.pdf`
+
       const a = document.createElement('a')
       a.href = url
-      a.download =
-        meta.fileName ||
-        `Certificate_${(meta.stylistName || 'Stylist').replace(/\s+/g, '_')}.pdf`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      console.error('Certificate click error:', err)
+      console.error('Unexpected error while preparing certificate:', err)
       alert(
-        'Something went wrong while downloading your certificate.\n\n' +
-        String(err?.message || err)
+        'Sorry, something went wrong while preparing your certificate.\n\n' +
+        (err?.message || String(err))
       )
     } finally {
-      setDownloading(false)
+      setBusy(false)
     }
   }
 
-  return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: '#0f0f10',
-        color: '#eaeaea',
-        fontFamily:
-          'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '28px'
-      }}
-    >
-      <div
-        style={{
-          width: 'min(920px, 100%)',
-          background: '#17181a',
-          border: '1px solid #2a2b2f',
-          borderRadius: '16px',
-          boxShadow: '0 8px 24px rgba(0,0,0,.35)',
-          padding: '22px'
-        }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: 12 }}>
-          <img
-            src="/logo.jpeg"
-            alt="Patrick Cameron – Style Challenge"
-            width="160"
-          />
-        </div>
+  const pageShell = {
+    minHeight: '100vh',
+    background: '#111',
+    color: '#eaeaea',
+    padding: '16px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    fontFamily:
+      'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+  }
 
-        <h1 style={{ fontSize: 24, margin: '4px 0 14px', textAlign: 'center' }}>
-          Congratulations!
-        </h1>
-        <p
-          style={{
-            margin: '0 0 16px',
-            textAlign: 'center',
-            color: '#cfcfcf'
-          }}
-        >
-          Patrick has approved your Style Challenge submission. Keep building your
-          long-hair artistry—this is just the start.
+  const card = {
+    width: 'min(900px, 96vw)',
+    background: '#1a1a1a',
+    borderRadius: 14,
+    padding: 20,
+    boxShadow: '0 10px 22px rgba(0,0,0,.35)',
+    border: '1px solid #2b2b2b',
+    textAlign: 'center',
+  }
+
+  const logoStyle = {
+    width: 180,
+    height: 'auto',
+    borderRadius: 12,
+    marginBottom: 10,
+  }
+
+  const btn = {
+    marginTop: 18,
+    background: '#28a745',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 10,
+    padding: '12px 18px',
+    fontWeight: 700,
+    cursor: busy ? 'default' : 'pointer',
+    opacity: busy ? 0.7 : 1,
+    boxShadow: '0 10px 22px rgba(0,0,0,.25)',
+  }
+
+  const tiny = {
+    marginTop: 10,
+    fontSize: 11,
+    color: '#999',
+    userSelect: 'all',
+    wordBreak: 'break-all',
+  }
+
+  return (
+    <main style={pageShell}>
+      <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 12 }}>
+        <img
+          src="/logo.jpeg"
+          alt="Patrick Cameron — Style Challenge"
+          style={logoStyle}
+        />
+      </div>
+
+      <div style={card}>
+        <h1 style={{ margin: '4px 0 10px' }}>Congratulations!</h1>
+        <p style={{ margin: '0 0 14px', color: '#dcdcdc', lineHeight: 1.4 }}>
+          Patrick has approved your Style Challenge submission.
+          Keep building your long-hair artistry—this is just the start.
         </p>
 
         <div
           style={{
-            aspectRatio: '16 / 9',
-            width: '100%',
-            background: '#0f0f10',
-            border: '1px dashed #2a2b2f',
+            margin: '18px auto 14px',
+            padding: '18px 14px',
             borderRadius: 12,
-            overflow: 'hidden',
-            margin: '16px 0 18px'
-          }}
-        >
-          {/* TODO: replace with real Vimeo video */}
-          <iframe
-            src="https://player.vimeo.com/video/000000000?h=placeholder&title=0&byline=0&portrait=0"
-            style={{ border: 0, width: '100%', height: '100%' }}
-            allow="autoplay; fullscreen; picture-in-picture"
-            allowFullScreen
-            title="Patrick’s message"
-          />
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            flexWrap: 'wrap',
-            justifyContent: 'center'
-          }}
-        >
-          <a
-            href="#"
-            onClick={handleCertificateClick}
-            style={{
-              background: '#eaeaea',
-              color: '#111',
-              textDecoration: 'none',
-              padding: '10px 14px',
-              borderRadius: 8,
-              fontWeight: 700,
-              display: 'inline-block',
-              opacity: downloading ? 0.8 : 1,
-              pointerEvents: downloading ? 'none' : 'auto'
-            }}
-          >
-            {downloading
-              ? 'Preparing your certificate…'
-              : 'Download your Patrick Cameron Certificate'}
-          </a>
-        </div>
-
-        {process.env.NODE_ENV !== 'production' && token && (
-          <div
-            style={{
-              marginTop: 14,
-              fontSize: 12,
-              color: '#8a8a8a',
-              textAlign: 'center'
-            }}
-          >
-            token: {token}
-          </div>
-        )}
-      </div>
-    </main>
-  )
-}
-
-export default function ApprovedResultPage() {
-  return (
-    <Suspense
-      fallback={
-        <main
-          style={{
-            minHeight: '100vh',
-            background: '#0f0f10',
-            color: '#eaeaea',
+            border: '1px dashed #333',
+            background: '#000',
+            minHeight: 220,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontFamily:
-              'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif'
+            color: '#777',
           }}
         >
-          <p>Loading your approval…</p>
-        </main>
-      }
-    >
-      <ApprovedResultInner />
-    </Suspense>
+          <div>
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>
+              Your certificate is ready
+            </div>
+            <div style={{ fontSize: 13 }}>
+              Click the button below and we&apos;ll prepare a printable
+              PDF certificate for you to download.
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCertificateClick}
+          disabled={busy}
+          style={btn}
+        >
+          {busy ? 'Preparing your certificate…' : 'Download your certificate'}
+        </button>
+
+        <div style={tiny}>
+          token: {token || '(missing)'}
+          {userEmail && (
+            <>
+              <br />
+              email: {userEmail}
+            </>
+          )}
+        </div>
+      </div>
+    </main>
   )
 }

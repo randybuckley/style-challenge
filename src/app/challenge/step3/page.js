@@ -9,12 +9,14 @@ import { useRouter, useSearchParams } from 'next/navigation'
 function ChallengeStep3Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [adminDemo, setAdminDemo] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -29,59 +31,84 @@ function ChallengeStep3Inner() {
         router.push('/')
         return
       }
-      setUser(sessionUser)
+      setUser(sessionUser || null)
       setLoading(false)
     })
   }, [router, searchParams])
 
   const handleFileChange = (fileObj) => {
-    setFile(fileObj)
+    setFile(fileObj || null)
     setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
+    setUploadMessage('')
   }
+
+  // Revoke previous object URL to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
 
   const handleUpload = async (e) => {
     e.preventDefault()
+    if (uploading) return
+
+    // Demo: allow continue without an upload
+    if (adminDemo && !file) {
+      setUploadMessage('✅ Demo mode: skipping upload.')
+      setShowOptions(true)
+      return
+    }
+
     if (!file && !adminDemo) {
       setUploadMessage('Please select a file first.')
       return
     }
 
-    const userId = user?.id || 'demo-user'
-    const filePath = makeUploadPath(userId, 'step3', file)
+    try {
+      setUploading(true)
+      setUploadMessage('Uploading…')
 
-    // Upload to Storage (only if a real file)
-    if (file) {
-      const { error: storageError } = await supabase.storage
-        .from('uploads')
-        .upload(filePath, file)
+      const userId = user?.id || 'demo-user'
+      const filePath = makeUploadPath(userId, 'step3', file)
 
-      if (storageError) {
-        console.error('❌ Storage upload failed:', storageError.message)
-        setUploadMessage(`❌ Upload failed: ${storageError.message}`)
-        return
+      // Upload to Storage (only if a real file)
+      if (file) {
+        const { error: storageError } = await supabase.storage
+          .from('uploads')
+          .upload(filePath, file)
+
+        if (storageError) {
+          console.error('❌ Storage upload failed (step3):', storageError.message)
+          setUploadMessage(`❌ Upload failed: ${storageError.message}`)
+          return
+        }
       }
-    }
 
-    // Insert into DB unless demo
-    if (!adminDemo && file && user?.id) {
-      const { error: dbError } = await supabase
-        .from('uploads')
-        .insert([{ user_id: user.id, step_number: 3, image_url: filePath }])
+      // Insert into DB unless demo
+      if (!adminDemo && file && user?.id) {
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .insert([{ user_id: user.id, step_number: 3, image_url: filePath }])
 
-      if (dbError) {
-        console.error('⚠️ DB insert error:', dbError.message)
-        setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
-        return
+        if (dbError) {
+          console.error('⚠️ DB insert error (step3):', dbError.message)
+          setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+          return
+        }
       }
-    }
 
-    if (file) {
-      const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
-      setImageUrl(fullUrl)
-    }
+      if (file) {
+        const fullUrl =
+          `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${filePath}`
+        setImageUrl(fullUrl)
+      }
 
-    setUploadMessage('✅ Upload complete!')
-    setShowOptions(true)
+      setUploadMessage('✅ Upload complete!')
+      setShowOptions(true)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const resetUpload = () => {
@@ -108,6 +135,7 @@ function ChallengeStep3Inner() {
         textAlign: 'center',
       }}
     >
+      {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Image
           src="/logo.jpeg"
@@ -154,7 +182,7 @@ function ChallengeStep3Inner() {
             left: 0,
             width: '100%',
             height: '100%',
-            border: '2px solid #555',   // ✅ fixed quoting
+            border: '2px solid #555',
             borderRadius: '6px',
           }}
           frameBorder="0"
@@ -236,14 +264,16 @@ function ChallengeStep3Inner() {
             />
           </label>
 
-          <p style={{
-            marginTop: '0.75rem',
-            fontSize: '1rem',
-            color: '#fff',
-            lineHeight: '1.4',
-            textShadow: '0 0 3px rgba(0,0,0,0.5)',
-            marginBottom: '1rem',
-          }}>
+          <p
+            style={{
+              marginTop: '0.75rem',
+              fontSize: '1rem',
+              color: '#fff',
+              lineHeight: '1.4',
+              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              marginBottom: '1rem',
+            }}
+          >
             Your photo preview is shown above.  
             Compare it carefully with Patrick’s version — are the finishing details polished?  
             <br/><br/>
@@ -252,23 +282,29 @@ function ChallengeStep3Inner() {
 
           <button
             type="submit"
+            disabled={uploading}
             style={{
               marginTop: '0.5rem',
               padding: '1rem 2rem',
-              backgroundColor: '#28a745',
+              backgroundColor: uploading ? '#1c7e33' : '#28a745',
               color: '#fff',
               borderRadius: '6px',
               border: 'none',
-              cursor: 'pointer',
+              cursor: uploading ? 'not-allowed' : 'pointer',
               fontSize: '1.1rem',
               fontWeight: '600',
               minWidth: '260px',
+              opacity: uploading ? 0.8 : 1,
             }}
           >
-            ✅ Confirm, Add to Portfolio & Go to Finished Look
+            {uploading
+              ? 'Uploading…'
+              : '✅ Confirm, Add to Portfolio & Go to Finished Look'}
           </button>
 
-          {uploadMessage && <p>{uploadMessage}</p>}
+          {uploadMessage && (
+            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
+          )}
         </form>
       )}
 
@@ -284,16 +320,25 @@ function ChallengeStep3Inner() {
             textAlign: 'center',
           }}
         >
-          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+          <h2
+            style={{
+              color: '#28a745',
+              fontSize: '1.5rem',
+              marginBottom: '0.75rem',
+              fontWeight: '700',
+            }}
+          >
             🌟 Step 3 Complete!
           </h2>
-          <p style={{
-            fontSize: '1.1rem',
-            color: '#fff',
-            lineHeight: '1.5',
-            textShadow: '0 0 3px rgba(0,0,0,0.5)',
-            marginBottom: '1rem',
-          }}>
+          <p
+            style={{
+              fontSize: '1.1rem',
+              color: '#fff',
+              lineHeight: '1.5',
+              textShadow: '0 0 3px rgba(0,0,0,0.5)',
+              marginBottom: '1rem',
+            }}
+          >
             Does this final step show your <strong>best work</strong>?  
             If yes, you’re ready to finish strong with the Completed Look!
           </p>

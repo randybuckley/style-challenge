@@ -30,7 +30,7 @@ function buildCertificatePayload(row, token) {
     salonName: salon,
     styleName,
     date,
-    certificateId
+    certificateId,
   }
 }
 
@@ -49,16 +49,14 @@ export async function POST(req) {
     // 1) Try review_tokens first
     const { data: tokenRow, error: tokenErr } = await supabaseAdmin
       .from('review_tokens')
-      .select(
-        `
-          token,
-          user_id,
-          user_email,
-          first_name,
-          second_name,
-          salon_name
-        `
-      )
+      .select(`
+        token,
+        user_id,
+        user_email,
+        first_name,
+        second_name,
+        salon_name
+      `)
       .eq('token', token)
       .maybeSingle()
 
@@ -67,27 +65,30 @@ export async function POST(req) {
       return NextResponse.json(payload, { status: 200 })
     }
 
-    // 2) If not found, fall back to submissions.review_token
+    // 2) Fall back to submissions.review_token
+    // IMPORTANT: this table uses `email`, not `user_email`
     const { data: submissionRow, error: subErr } = await supabaseAdmin
       .from('submissions')
-      .select(
-        `
-          review_token,
-          user_id,
-          user_email,
-          first_name,
-          second_name,
-          salon_name
-        `
-      )
+      .select(`
+        review_token,
+        user_id,
+        email,
+        first_name,
+        second_name,
+        salon_name
+      `)
       .eq('review_token', token)
       .maybeSingle()
+
+    if (subErr) {
+      console.error('review-certification: submissions query error', subErr)
+    }
 
     if (submissionRow) {
       const payload = buildCertificatePayload(
         {
           ...submissionRow,
-          token: submissionRow.review_token
+          token: submissionRow.review_token,
         },
         token
       )
@@ -98,7 +99,7 @@ export async function POST(req) {
     console.error('review-certification: token not found in either table', {
       token,
       tokenErr,
-      subErr
+      subErr,
     })
 
     return NextResponse.json(

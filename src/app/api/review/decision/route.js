@@ -12,9 +12,9 @@ export async function GET(req) {
     const url = new URL(req.url)
     const origin = process.env.NEXT_PUBLIC_SITE_URL || url.origin
 
-    const action = safe(url.searchParams.get('action')).toLowerCase()
-    const token = safe(url.searchParams.get('token'))
-    const userEmail = safe(url.searchParams.get('userEmail'))
+    const action    = safe(url.searchParams.get('action')).toLowerCase()
+    const token     = safe(url.searchParams.get('token'))
+    const userEmail = safe(url.searchParams.get('userEmail') || url.searchParams.get('ue'))
 
     if (!token) {
       return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
@@ -25,9 +25,13 @@ export async function GET(req) {
         if (SENDGRID_API_KEY && userEmail) {
           sgMail.setApiKey(SENDGRID_API_KEY)
 
-          const site = origin.replace(/\/+$/,'')
-          const logoUrl = `${site}/logo.jpeg` // public/logo.jpeg
-          const resultUrl = `${site}/result/approved?token=${encodeURIComponent(token)}`
+          const site    = origin.replace(/\/+$/, '')
+          const logoUrl = `${site}/logo.jpeg`
+
+          // NOTE: now includes userEmail in the URL
+          const resultUrl = `${site}/result/approved?token=${encodeURIComponent(
+            token
+          )}&userEmail=${encodeURIComponent(userEmail)}`
 
           const html = `
             <div style="background:#f7f7f8;padding:24px 0;">
@@ -78,7 +82,7 @@ export async function GET(req) {
           })
         }
       } catch {
-        // Do not block reviewer on mail failure
+        // don't block Patrick if mail fails
       }
 
       return NextResponse.redirect(`${origin}/review/approved`, 302)

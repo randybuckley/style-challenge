@@ -1,5 +1,5 @@
 'use client'
-/* eslint-disable react/no-unescaped-entities, @next/next/no-img-element */
+/* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
 
 import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
@@ -10,66 +10,101 @@ import { useRouter, useSearchParams } from 'next/navigation'
 function ChallengeStep1Page() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [adminDemo, setAdminDemo] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const router = useRouter()
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    setAdminDemo(searchParams.get('admin_demo') === 'true')
+    const isAdminDemo = searchParams.get('admin_demo') === 'true'
+    setAdminDemo(isAdminDemo)
 
     supabase.auth.getSession().then(async ({ data }) => {
       const sessionUser = data.session?.user
-      if (!sessionUser) {
+      if (!sessionUser && !isAdminDemo) {
         router.push('/')
         return
       }
-      setUser(sessionUser)
+      setUser(sessionUser || null)
       setLoading(false)
     })
   }, [router, searchParams])
 
   const handleFileChange = (fileObj) => {
-    setFile(fileObj)
+    setFile(fileObj || null)
     setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
+    setUploadMessage('')
   }
+
+  // Revoke previous object URL to avoid memory leaks
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
 
   const handleUpload = async (e) => {
     e.preventDefault()
+    if (uploading) return
+
+    // Demo: allow continue without an upload
+    if (adminDemo && !file) {
+      setUploadMessage('✅ Demo mode: skipping upload.')
+      setShowOptions(true)
+      return
+    }
+
     if (!file || !user) {
       setUploadMessage('Please select a photo first.')
       return
     }
 
-    const filePath = makeUploadPath(user.id, 'step1', file)
+    try {
+      setUploading(true)
+      setUploadMessage('Uploading…')
 
-    const { data, error } = await supabase.storage
-      .from('uploads')
-      .upload(filePath, file)
+      const filePath = makeUploadPath(user.id, 'step1', file)
 
-    if (error) {
-      setUploadMessage(`❌ Upload failed: ${error.message}`)
-      return
+      // Upload to Storage
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .upload(filePath, file)
+
+      if (error) {
+        console.error('❌ Storage upload failed (step1):', error.message)
+        setUploadMessage(`❌ Upload failed: ${error.message}`)
+        return
+      }
+
+      const path = data?.path || filePath
+
+      // Insert DB row (non-demo only)
+      if (!adminDemo && user) {
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .insert([{ user_id: user.id, step_number: 1, image_url: path }])
+
+        if (dbError) {
+          console.error('⚠️ DB insert error (step1):', dbError.message)
+          setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+          return
+        }
+      }
+
+      const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${path}`
+      setImageUrl(fullUrl)
+      setUploadMessage('✅ Upload complete!')
+      setShowOptions(true)
+    } finally {
+      setUploading(false)
     }
-
-    const { error: dbError } = await supabase
-      .from('uploads')
-      .insert([{ user_id: user.id, step_number: 1, image_url: data.path }])
-
-    if (dbError) {
-      setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
-      return
-    }
-
-    const fullUrl = `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${data.path}`
-    setImageUrl(fullUrl)
-    setUploadMessage('✅ Upload complete!')
-    setShowOptions(true)
   }
 
   const resetUpload = () => {
@@ -252,23 +287,27 @@ function ChallengeStep1Page() {
 
           <button
             type="submit"
+            disabled={uploading}
             style={{
               marginTop: '0.5rem',
               padding: '1rem 2rem',
-              backgroundColor: '#28a745',
+              backgroundColor: uploading ? '#1c7e33' : '#28a745',
               color: '#fff',
               borderRadius: '6px',
               border: 'none',
-              cursor: 'pointer',
+              cursor: uploading ? 'not-allowed' : 'pointer',
               fontSize: '1.1rem',
               fontWeight: '600',
               minWidth: '260px',
+              opacity: uploading ? 0.8 : 1,
             }}
           >
-            ✅ Confirm, Add to Portfolio & Move to Step 2
+            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
 
-          {uploadMessage && <p>{uploadMessage}</p>}
+          {uploadMessage && (
+            <p style={{ marginTop: 8 }}>{uploadMessage}</p>
+          )}
         </form>
       )}
 
@@ -352,7 +391,13 @@ function ChallengeStep1Page() {
 /** Suspense wrapper required for components that call useSearchParams(). */
 export default function Step1Page() {
   return (
-    <Suspense fallback={<main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>Loading…</main>}>
+    <Suspense
+      fallback={
+        <main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>
+          Loading…
+        </main>
+      }
+    >
       <ChallengeStep1Page />
     </Suspense>
   )
