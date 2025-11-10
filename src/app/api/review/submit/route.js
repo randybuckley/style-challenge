@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server'
 import sgMail from '@sendgrid/mail'
 import crypto from 'crypto'
+import { supabaseAdmin } from '../../../../lib/supabaseAdmin'
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
@@ -11,7 +12,7 @@ function toPublicUrl(urlOrPath = '') {
   if (!urlOrPath) return ''
   if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath
   // handle things like "7515.../step1-...jpg"
-  return PUBLIC_UPLOADS_PREFIX.replace(/\/+$/,'/') + urlOrPath.replace(/^\/+/, '')
+  return PUBLIC_UPLOADS_PREFIX.replace(/\/+$/, '/') + urlOrPath.replace(/^\/+/, '')
 }
 
 // Convert Supabase object URL to render endpoint (JPEG, sane size) for emails
@@ -40,7 +41,10 @@ async function fetchAsBase64(url) {
 }
 
 function escapeHtml(s = '') {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c] || c))
+  return s.replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&gt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c)
+  )
 }
 
 export async function POST(req) {
@@ -55,12 +59,15 @@ export async function POST(req) {
     } = (await req.json()) || {}
 
     if (!userId || !userEmail) {
-      return NextResponse.json({ ok:false, error:'Missing userId or userEmail' }, { status:400 })
+      return NextResponse.json(
+        { ok: false, error: 'Missing userId or userEmail' },
+        { status: 400 }
+      )
     }
 
     // Normalize -> absolute URLs -> rendered JPEG
     const normalized = {}
-    for (const n of [1,2,3,4]) {
+    for (const n of [1, 2, 3, 4]) {
       const src = images[n]
       if (!src) continue
       const full = toRenderedJpeg(toPublicUrl(src))
@@ -70,11 +77,11 @@ export async function POST(req) {
     // Prepare inline attachments
     const cids = {}
     const attachments = []
-    for (const n of [1,2,3,4]) {
+    for (const n of [1, 2, 3, 4]) {
       const url = normalized[n]
       if (!url) continue
       const { base64, mime } = await fetchAsBase64(url)
-      const cid = (n === 4 ? 'finished' : `step${n}`)
+      const cid = n === 4 ? 'finished' : `step${n}`
       cids[n] = cid
       attachments.push({
         content: base64,
@@ -99,25 +106,52 @@ export async function POST(req) {
       })
     } catch {}
 
-    // Token for reviewer actions (your approve path stays as-is)
+    // Token for reviewer actions
     const token = crypto.randomUUID().replace(/-/g, '')
-    const approveUrl = `${baseUrl}/api/review/decision?token=${token}&action=approve&ue=${encodeURIComponent(userEmail)}`
-    const rejectUrl  = `${baseUrl}/review/${token}`
+    const approveUrl = `${baseUrl}/api/review/decision?token=${token}&action=approve&ue=${encodeURIComponent(
+      userEmail
+    )}`
+    const rejectUrl = `${baseUrl}/review/${token}`
+
+    // 🔹 Store the token in Supabase so later routes can find it
+    const { error: tokenError } = await supabaseAdmin.from('review_tokens').insert({
+      token,
+      user_id: userId,
+      user_email: userEmail,
+      first_name: firstName || null,
+      second_name: secondName || null
+      // add salon_name here if you later include it in the request body
+      // salon_name: salonName || null,
+    })
+
+    if (tokenError) {
+      console.error('review_tokens insert error', tokenError)
+      return NextResponse.json(
+        { ok: false, error: 'Failed to create review token' },
+        { status: 500 }
+      )
+    }
 
     const stylist = [firstName, secondName].filter(Boolean).join(' ') || userEmail
 
-    const imgBlock = [1,2,3,4].map(n => {
-      const label = n === 4 ? 'Finished Look' : `Step ${n}`
-      const cid = cids[n]
-      return cid
-        ? `
+    const imgBlock = [1, 2, 3, 4]
+      .map(n => {
+        const label = n === 4 ? 'Finished Look' : `Step ${n}`
+        const cid = cids[n]
+        return cid
+          ? `
           <div style="margin:12px 0;">
-            <div style="font-size:13px;color:#666;margin-bottom:6px;">${escapeHtml(label)}</div>
-            <img src="cid:${cid}" alt="${escapeHtml(label)}"
+            <div style="font-size:13px;color:#666;margin-bottom:6px;">${escapeHtml(
+              label
+            )}</div>
+            <img src="cid:${cid}" alt="${escapeHtml(
+              label
+            )}"
                  style="display:block;border-radius:10px;border:1px solid #eee;max-width:480px;width:100%;height:auto;">
           </div>`
-        : ''
-    }).join('')
+          : ''
+      })
+      .join('')
 
     const logoImg = logoCid
       ? `<img src="cid:${logoCid}" alt="Style Challenge"
@@ -154,12 +188,15 @@ export async function POST(req) {
       replyTo: userEmail,
       subject: `Style Challenge submission — ${stylist}`,
       html,
-      attachments, // <- forces multipart/related with inline CIDs
+      attachments // <- forces multipart/related with inline CIDs
     })
 
-    return NextResponse.json({ ok:true, token })
+    return NextResponse.json({ ok: true, token })
   } catch (err) {
     console.error('/api/review/submit', err)
-    return NextResponse.json({ ok:false, error: String(err?.message || err) }, { status:500 })
+    return NextResponse.json(
+      { ok: false, error: String(err?.message || err) },
+      { status: 500 }
+    )
   }
 }

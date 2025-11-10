@@ -7,6 +7,33 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
+function buildCertificatePayload(row, token) {
+  const first = (row.first_name || '').trim()
+  const second = (row.second_name || '').trim()
+  const salon = (row.salon_name || '').trim()
+
+  const stylistName =
+    [first, second].filter(Boolean).join(' ') ||
+    (row.user_email || row.email || 'Stylist')
+
+  const styleName = 'Challenge Number One'
+
+  const today = new Date()
+  const date = today.toISOString().slice(0, 10)
+
+  const tail = String(token || row.token || '').slice(-6).toUpperCase() || '000000'
+  const certificateId = `PC-${tail}`
+
+  return {
+    ok: true,
+    stylistName,
+    salonName: salon,
+    styleName,
+    date,
+    certificateId
+  }
+}
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
@@ -19,8 +46,8 @@ export async function POST(req) {
       )
     }
 
-    // Look up the review token row
-    const { data: row, error } = await supabaseAdmin
+    // 1) Try review_tokens first
+    const { data: tokenRow, error: tokenErr } = await supabaseAdmin
       .from('review_tokens')
       .select(
         `
@@ -33,47 +60,50 @@ export async function POST(req) {
         `
       )
       .eq('token', token)
-      .single()
+      .maybeSingle()
 
-    if (error || !row) {
-      console.error('review-certification: token lookup failed', error || 'no row')
-      return NextResponse.json(
-        { ok: false, error: 'Review token not found' },
-        { status: 404 }
-      )
+    if (tokenRow) {
+      const payload = buildCertificatePayload(tokenRow, token)
+      return NextResponse.json(payload, { status: 200 })
     }
 
-    // We USED to require user_id here – that is what caused:
-    // { "error": "Missing userId" }
-    // For the certificate PDF we only need stylist/salon/style info,
-    // so we no longer treat a missing user_id as an error.
+    // 2) If not found, fall back to submissions.review_token
+    const { data: submissionRow, error: subErr } = await supabaseAdmin
+      .from('submissions')
+      .select(
+        `
+          review_token,
+          user_id,
+          user_email,
+          first_name,
+          second_name,
+          salon_name
+        `
+      )
+      .eq('review_token', token)
+      .maybeSingle()
 
-    const first = (row.first_name || '').trim()
-    const second = (row.second_name || '').trim()
-    const salon = (row.salon_name || '').trim()
+    if (submissionRow) {
+      const payload = buildCertificatePayload(
+        {
+          ...submissionRow,
+          token: submissionRow.review_token
+        },
+        token
+      )
+      return NextResponse.json(payload, { status: 200 })
+    }
 
-    const stylistName = [first, second].filter(Boolean).join(' ') || (row.user_email || 'Stylist')
-    const styleName = 'Challenge Number One' // current challenge name
-
-    // Use today's date in YYYY-MM-DD for the certificate
-    const today = new Date()
-    const date = today.toISOString().slice(0, 10)
-
-    // Simple deterministic-ish certificate ID:
-    // PC- + last 6 chars of token uppercased
-    const tokenTail = String(row.token || '').slice(-6).toUpperCase() || '000000'
-    const certificateId = `PC-${tokenTail}`
+    // 3) Nothing in either table
+    console.error('review-certification: token not found in either table', {
+      token,
+      tokenErr,
+      subErr
+    })
 
     return NextResponse.json(
-      {
-        ok: true,
-        stylistName,
-        salonName: salon,
-        styleName,
-        date,
-        certificateId,
-      },
-      { status: 200 }
+      { ok: false, error: 'Review token not found' },
+      { status: 404 }
     )
   } catch (err) {
     console.error('review-certification: unexpected error', err)
@@ -84,9 +114,9 @@ export async function POST(req) {
   }
 }
 
-// Optional: guard other HTTP methods
+// Guard other methods
 export function GET() {
   return new NextResponse('Method Not Allowed', { status: 405 })
 }
-export function PUT() { return GET() }
-export function DELETE() { return GET() }
+export const PUT = GET
+export const DELETE = GET
