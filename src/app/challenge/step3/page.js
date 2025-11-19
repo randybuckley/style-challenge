@@ -91,6 +91,7 @@ function ChallengeStep3Inner() {
     e.preventDefault()
     if (uploading) return
 
+    // Admin demo behaviour
     if (adminDemo) {
       if (!file && imageUrl) {
         setUploadMessage('✅ Demo mode: using your existing photo.')
@@ -104,11 +105,13 @@ function ChallengeStep3Inner() {
       }
     }
 
+    // Normal mode: block if we have no file and no existing image
     if (!file && !imageUrl && !adminDemo) {
       setUploadMessage('Please select a file first.')
       return
     }
 
+    // Normal mode: no new file, but we already have an image -> just confirm
     if (!file && imageUrl && !adminDemo) {
       setUploadMessage('✅ Using your existing photo for Step 3.')
       setShowOptions(true)
@@ -177,6 +180,7 @@ function ChallengeStep3Inner() {
 
   if (loading) return <p>Loading challenge step 3…</p>
 
+  // Shared frame styles
   const overlayFrame = {
     position: 'relative',
     width: '100%',
@@ -204,12 +208,12 @@ function ChallengeStep3Inner() {
     justifyContent: 'center',
   }
 
+  // 🔧 Changed: remove huge outline overlay, use a simple border like Finished page
   const oval = {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
-    boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
-    outline: '2000px solid rgba(0, 0, 0, 0.45)',
+    border: '3px solid rgba(255, 255, 255, 0.9)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -222,8 +226,13 @@ function ChallengeStep3Inner() {
         padding: '2rem',
         fontFamily: 'sans-serif',
         textAlign: 'center',
+        minHeight: '100vh',
+        backgroundColor: '#111',
+        color: '#f5f5f5',
+        boxSizing: 'border-box',
       }}
     >
+      {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Image
           src="/logo.jpeg"
@@ -253,6 +262,7 @@ function ChallengeStep3Inner() {
         Watch Patrick’s demo for Step&nbsp;3, then capture your final working image.
       </p>
 
+      {/* Video */}
       <div
         style={{
           marginBottom: '2rem',
@@ -279,6 +289,7 @@ function ChallengeStep3Inner() {
         />
       </div>
 
+      {/* Compare section */}
       <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
         Compare Your Work
       </h3>
@@ -304,6 +315,7 @@ function ChallengeStep3Inner() {
             />
           </div>
         </div>
+
         <div style={{ flex: 1, minWidth: 200 }}>
           <p>
             <strong>Your Version</strong>
@@ -324,9 +336,11 @@ function ChallengeStep3Inner() {
                 }}
               />
             )}
+
             <div style={ovalMask}>
               <div style={oval} />
             </div>
+
             {!hasImage && (
               <div
                 style={{
@@ -344,10 +358,12 @@ function ChallengeStep3Inner() {
               </div>
             )}
           </div>
+
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
       </div>
 
+      {/* Upload controls */}
       {!showOptions && !adminDemo && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
           <label

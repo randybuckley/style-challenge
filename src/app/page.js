@@ -53,7 +53,6 @@ export default function HomePage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          // In prod, consider NEXT_PUBLIC_SITE_URL for absolute domain
           emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       })
@@ -88,7 +87,7 @@ export default function HomePage() {
         padding: '2rem 1rem',
       }}
     >
-      {/* Logo (no stretch) */}
+      {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <div
           style={{
@@ -121,7 +120,7 @@ export default function HomePage() {
         }}
       >
         <iframe
-          src="https://player.vimeo.com/video/1096804683?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
+          src="https://player.vimeo.com/video/1138306428?h=ef9c1092a9&badge=0&autopause=0&player_id=0&app_id=58479"
           style={{
             position: 'absolute',
             inset: 0,
@@ -132,8 +131,9 @@ export default function HomePage() {
           }}
           frameBorder="0"
           allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+          referrerPolicy="strict-origin-when-cross-origin"
           allowFullScreen
-          title="Welcome to the Style Challenge"
+          title="Opening video"
         />
       </div>
 

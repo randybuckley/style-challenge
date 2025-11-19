@@ -202,13 +202,13 @@ function ChallengeStep1Page() {
     justifyContent: 'center',
   }
 
-  // ⬆️ oval made larger here
+  // Softer vignette
   const oval = {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
     boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
-    outline: '2000px solid rgba(0,0,0,0.45)',
+    outline: '1200px solid rgba(0,0,0,0.22)', // was 2000px @ 0.45
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -221,6 +221,9 @@ function ChallengeStep1Page() {
         padding: '2rem',
         fontFamily: 'sans-serif',
         textAlign: 'center',
+        backgroundColor: '#000',   // force dark canvas
+        color: '#fff',             // base text colour
+        minHeight: '100vh',        // fill viewport so black covers everything
       }}
     >
       {/* Logo */}
@@ -346,8 +349,9 @@ function ChallengeStep1Page() {
               <div
                 style={{
                   ...previewImageStyle,
+                  // lighter placeholder so the whole page feels less "dim"
                   background:
-                    'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
+                    'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
                 }}
               />
             )}
@@ -377,6 +381,75 @@ function ChallengeStep1Page() {
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
       </div>
+
+      {/* Camera help – for in-app browser / permissions issues */}
+      <section
+        style={{
+          margin: '1.5rem auto 0',
+          maxWidth: 520,
+          textAlign: 'left',
+          backgroundColor: '#151515',
+          borderRadius: 10,
+          padding: '10px 12px',
+          border: '1px solid #333',
+        }}
+      >
+        <h3
+          style={{
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            marginBottom: 6,
+            color: '#f5f5f5',
+          }}
+        >
+          If your camera doesn’t appear
+        </h3>
+        <p
+          style={{
+            fontSize: '0.85rem',
+            lineHeight: 1.4,
+            color: '#dddddd',
+            marginBottom: 4,
+          }}
+        >
+          When you tap <strong>“Take Photo / Choose Photo”</strong> you should
+          see your camera or photo library. If nothing happens, try this:
+        </p>
+        <ul
+          style={{
+            margin: '0 0 4px 18px',
+            padding: 0,
+            fontSize: '0.85rem',
+            lineHeight: 1.4,
+            color: '#dddddd',
+          }}
+        >
+          <li>
+            If you opened this from another app (Instagram, Facebook, some email
+            apps), use that app’s menu and choose{' '}
+            <strong>“Open in Safari”</strong> or <strong>“Open in Chrome”</strong>.
+          </li>
+          <li>
+            Check your browser permissions — look for a camera icon or
+            “Permissions” in the address bar and choose <strong>Allow</strong>.
+          </li>
+          <li>
+            If the live camera still won’t open, take the photo with your normal
+            camera app first, then choose <strong>Photo Library</strong> /
+            <strong>Choose Photo</strong> and upload it from your gallery.
+          </li>
+        </ul>
+        <p
+          style={{
+            fontSize: '0.8rem',
+            color: '#aaaaaa',
+            margin: 0,
+          }}
+        >
+          The camera is only used when you choose to take or upload a photo —
+          never in the background.
+        </p>
+      </section>
 
       {/* Upload Section */}
       {!showOptions && !adminDemo && (
@@ -455,7 +528,14 @@ function ChallengeStep1Page() {
             textAlign: 'center',
           }}
         >
-          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+          <h2
+            style={{
+              color: '#28a745',
+              fontSize: '1.5rem',
+              marginBottom: '0.75rem',
+              fontWeight: '700',
+            }}
+          >
             🎉 Great work!
           </h2>
           <p

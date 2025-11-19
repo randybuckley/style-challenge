@@ -154,8 +154,24 @@ export default function CertifyPage() {
       <h1 style={title}>Become Certified</h1>
 
       <div style={frame}>
-        <div style={videoBox}>
-          <div style={videoGhost}>Video: Patrick explains certification</div>
+        {/* Video Frame */}
+        <div style={videoFrame}>
+          <iframe
+            src="https://player.vimeo.com/video/1138319894?h=ee0f85c7f7&badge=0&autopause=0&player_id=0&app_id=58479"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+            frameBorder="0"
+            allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+            title="Certificate"
+          />
         </div>
 
         <p style={leadText}>
@@ -255,17 +271,17 @@ const frame = {
   boxShadow: '0 10px 22px rgba(0,0,0,.35)',
   border: '1px solid #2b2b2b',
 }
-const videoBox = {
-  border: '1px dashed #333',
+const videoFrame = {
+  width: '100%',
+  maxWidth: 900,
+  margin: '0 auto 16px auto',
   borderRadius: 12,
+  overflow: 'hidden',
   background: '#000',
-  height: 300,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginBottom: 16,
+  aspectRatio: '16 / 9',
+  position: 'relative',
+  border: '1px solid #2b2b2b',
 }
-const videoGhost = { color: '#9a9a9a', fontSize: 14 }
 const leadText = {
   textAlign: 'center',
   color: '#dcdcdc',

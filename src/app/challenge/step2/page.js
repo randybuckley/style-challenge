@@ -173,12 +173,12 @@ function ChallengeStep2Inner() {
 
   if (loading) return <p>Loading challenge step 2…</p>
 
-  // ---- shared “Your Version” frame styles (copied from Step 1) ----
+  // ---- shared “Your Version” frame styles (aligned with other steps) ----
   const overlayFrame = {
     position: 'relative',
     width: '100%',
     maxWidth: 320,
-    margin: '0 auto',
+    margin: '0 auto'
   }
 
   const previewImageStyle = {
@@ -189,7 +189,7 @@ function ChallengeStep2Inner() {
     border: '1px solid #ccc',
     boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
     background: '#000',
-    display: 'block',
+    display: 'block'
   }
 
   const ovalMask = {
@@ -198,15 +198,15 @@ function ChallengeStep2Inner() {
     pointerEvents: 'none',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'center'
   }
 
+  // 🔧 Changed: remove dark outline overlay, use a simple border only
   const oval = {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
-    boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
-    outline: '2000px solid rgba(0, 0, 0, 0.45)',
+    border: '3px solid rgba(255, 255, 255, 0.9)'
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -219,6 +219,9 @@ function ChallengeStep2Inner() {
         padding: '2rem',
         fontFamily: 'sans-serif',
         textAlign: 'center',
+        backgroundColor: '#000', // lock dark mode
+        color: '#fff',
+        minHeight: '100vh'
       }}
     >
       {/* Logo */}
@@ -238,7 +241,7 @@ function ChallengeStep2Inner() {
         style={{
           width: '50%',
           margin: '0.5rem auto 1rem auto',
-          border: '0.5px solid #666',
+          border: '0.5px solid #666'
         }}
       />
 
@@ -246,7 +249,7 @@ function ChallengeStep2Inner() {
         style={{
           marginBottom: '0.75rem',
           fontSize: '1rem',
-          color: '#ddd',
+          color: '#ddd'
         }}
       >
         Before you take your Step&nbsp;2 photo:
@@ -260,7 +263,7 @@ function ChallengeStep2Inner() {
           fontSize: '0.95rem',
           maxWidth: 520,
           marginInline: 'auto',
-          lineHeight: 1.5,
+          lineHeight: 1.5
         }}
       >
         <li>Watch Patrick’s demo for Step 2.</li>
@@ -271,7 +274,7 @@ function ChallengeStep2Inner() {
         style={{
           marginBottom: '2rem',
           fontSize: '1rem',
-          color: '#ddd',
+          color: '#ddd'
         }}
       >
         <strong>Important:</strong> Keep your phone <strong>upright (portrait)</strong>{' '}
@@ -284,7 +287,7 @@ function ChallengeStep2Inner() {
           marginBottom: '2rem',
           width: '100%',
           aspectRatio: '16 / 9',
-          position: 'relative',
+          position: 'relative'
         }}
       >
         <iframe
@@ -296,7 +299,7 @@ function ChallengeStep2Inner() {
             width: '100%',
             height: '100%',
             border: '2px solid #555',
-            borderRadius: '6px',
+            borderRadius: '6px'
           }}
           frameBorder="0"
           allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
@@ -316,7 +319,7 @@ function ChallengeStep2Inner() {
           flexWrap: 'wrap',
           justifyContent: 'center',
           textAlign: 'center',
-          marginBottom: '2rem',
+          marginBottom: '2rem'
         }}
       >
         {/* Patrick */}
@@ -349,8 +352,9 @@ function ChallengeStep2Inner() {
               <div
                 style={{
                   ...previewImageStyle,
+                  // lighter placeholder (matches other steps)
                   background:
-                    'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
+                    'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)'
                 }}
               />
             )}
@@ -369,7 +373,7 @@ function ChallengeStep2Inner() {
                   color: '#fff',
                   fontSize: '0.9rem',
                   textAlign: 'center',
-                  opacity: 0.9,
+                  opacity: 0.9
                 }}
               >
                 Hold phone upright — fill the oval
@@ -396,7 +400,7 @@ function ChallengeStep2Inner() {
               cursor: 'pointer',
               textAlign: 'center',
               marginBottom: '0.75rem',
-              fontWeight: 600,
+              fontWeight: 600
             }}
           >
             📸 Take Photo / Choose Photo (Portrait)
@@ -416,7 +420,7 @@ function ChallengeStep2Inner() {
               color: '#fff',
               lineHeight: '1.4',
               textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
-              marginBottom: '1rem',
+              marginBottom: '1rem'
             }}
           >
             Check that the head and hair stay inside the oval and the Step&nbsp;2
@@ -437,7 +441,7 @@ function ChallengeStep2Inner() {
               fontSize: '1.1rem',
               fontWeight: '600',
               minWidth: '260px',
-              opacity: uploading ? 0.8 : 1,
+              opacity: uploading ? 0.8 : 1
             }}
           >
             {uploading
@@ -455,7 +459,7 @@ function ChallengeStep2Inner() {
             border: '2px solid #28a745',
             borderRadius: '8px',
             background: 'rgba(40, 167, 69, 0.1)',
-            textAlign: 'center',
+            textAlign: 'center'
           }}
         >
           <h2
@@ -463,7 +467,7 @@ function ChallengeStep2Inner() {
               color: '#28a745',
               fontSize: '1.5rem',
               marginBottom: '0.75rem',
-              fontWeight: '700',
+              fontWeight: '700'
             }}
           >
             🎉 Step 2 looks great!
@@ -474,7 +478,7 @@ function ChallengeStep2Inner() {
               color: '#fff',
               lineHeight: '1.5',
               textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
-              marginBottom: '1rem',
+              marginBottom: '1rem'
             }}
           >
             Does this image show your <strong>best work</strong> for Step 2? If
@@ -493,7 +497,7 @@ function ChallengeStep2Inner() {
               marginRight: '1rem',
               cursor: 'pointer',
               fontWeight: '600',
-              minWidth: '200px',
+              minWidth: '200px'
             }}
           >
             ✅ Yes, This is My Best Work – Continue
@@ -511,7 +515,7 @@ function ChallengeStep2Inner() {
                 borderRadius: '6px',
                 cursor: 'pointer',
                 fontWeight: '600',
-                minWidth: '200px',
+                minWidth: '200px'
               }}
             >
               🔁 No, I’ll Upload a Better Pic
