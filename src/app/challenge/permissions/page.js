@@ -8,7 +8,7 @@ import { supabase } from '../../../lib/supabaseClient'
 export default function PermissionsPage() {
   const router = useRouter()
   const [user, setUser] = useState(null)
-  const [choice, setChoice] = useState(null)
+  const [choice, setChoice] = useState(null) // 'yes' | 'no' | null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -25,16 +25,23 @@ export default function PermissionsPage() {
 
       setUser(sessionUser)
 
-      // Load existing consent if any
-      const { data: profile } = await supabase
+      // Look up existing consent (if any)
+      const { data: rows, error: profileErr } = await supabase
         .from('profiles')
         .select('media_consent')
         .eq('id', sessionUser.id)
-        .single()
+        .limit(1)
 
-      if (profile?.media_consent !== null) {
-        setChoice(profile.media_consent ? 'yes' : 'no')
+      if (profileErr) {
+        console.error('Error loading media_consent:', profileErr.message)
+        return
       }
+
+      const mediaConsent =
+        rows && rows.length > 0 ? rows[0].media_consent : null
+
+      if (mediaConsent === true) setChoice('yes')
+      if (mediaConsent === false) setChoice('no')
     }
 
     load()
@@ -45,17 +52,28 @@ export default function PermissionsPage() {
       setError('Please choose one option.')
       return
     }
+    if (!user) {
+      setError('You must be signed in to continue.')
+      return
+    }
 
     setSaving(true)
     setError('')
 
-    await supabase
-      .from('profiles')
-      .update({
-        media_consent: choice === 'yes',
-        media_consent_at: new Date().toISOString()
-      })
-      .eq('id', user.id)
+    // Upsert so it also works for brand-new profiles
+    const { error: upsertErr } = await supabase.from('profiles').upsert({
+      id: user.id,
+      email: user.email ?? null,
+      media_consent: choice === 'yes',
+      media_consent_at: new Date().toISOString()
+    })
+
+    if (upsertErr) {
+      console.error('Error saving media_consent:', upsertErr.message)
+      setError('Sorry, we could not save your choice. Please try again.')
+      setSaving(false)
+      return
+    }
 
     setSaving(false)
     router.push('/challenge/step1')
@@ -175,9 +193,7 @@ export default function PermissionsPage() {
         </label>
 
         {error && (
-          <p style={{ color: '#ffb3b3', marginTop: '0.75rem' }}>
-            {error}
-          </p>
+          <p style={{ color: '#ffb3b3', marginTop: '0.75rem' }}>{error}</p>
         )}
       </div>
 

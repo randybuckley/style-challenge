@@ -22,23 +22,58 @@ function ChallengeStep1Page() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Session + admin flag
+  // -------- Session + admin flag + consent gate --------
   useEffect(() => {
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
     setAdminDemo(isAdminDemo)
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    const loadSessionAndConsent = async () => {
+      const { data, error } = await supabase.auth.getSession()
+
+      if (error) {
+        console.error('Error getting session:', error.message)
+        setLoading(false)
+        return
+      }
+
       const sessionUser = data.session?.user
+
+      // Not logged in and not in demo mode → back to home
       if (!sessionUser && !isAdminDemo) {
         router.push('/')
         return
       }
+
+      // If we have a real user and are NOT in admin demo,
+      // check whether they’ve answered the permission question.
+      if (sessionUser && !isAdminDemo) {
+        const { data: profile, error: profErr } = await supabase
+          .from('profiles')
+          .select('media_consent')              // 👈 use media_consent
+          .eq('id', sessionUser.id)
+          .maybeSingle()
+
+        if (profErr) {
+          console.warn('Error loading profile for consent check:', profErr.message)
+        }
+
+        const consent = profile?.media_consent   // 👈 read media_consent
+
+        // If media_consent is null/undefined → send to permissions page
+        if (consent === null || typeof consent === 'undefined') {
+          router.push('/challenge/permissions')
+          return
+        }
+      }
+
       setUser(sessionUser || null)
       setLoading(false)
-    })
+    }
+
+    loadSessionAndConsent()
   }, [router, searchParams])
 
-  // Load last Step 1 image
+  // -------- Load last Step 1 image --------
   useEffect(() => {
     if (!user || adminDemo) return
 
@@ -79,33 +114,39 @@ function ChallengeStep1Page() {
     setUploadMessage('')
   }
 
+  // Revoke object URL on unmount
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
   }, [previewUrl])
 
+  // -------- Upload handler --------
   const handleUpload = async (e) => {
     e.preventDefault()
     if (uploading) return
 
+    // Demo mode shortcut: use existing image if there is one
     if (adminDemo && !file && imageUrl) {
       setUploadMessage('✅ Demo mode: using your existing photo.')
       setShowOptions(true)
       return
     }
 
+    // No new file and no existing image → block
     if (!file && !imageUrl) {
       setUploadMessage('Please select a photo first.')
       return
     }
 
+    // No new file, but existing image → just confirm
     if (!file && imageUrl) {
       setUploadMessage('✅ Using your existing photo for Step 1.')
       setShowOptions(true)
       return
     }
 
+    // New file but no valid session (outside demo) → block
     if (!user && !adminDemo) {
       setUploadMessage('There was a problem with your session. Please sign in again.')
       return
@@ -115,7 +156,8 @@ function ChallengeStep1Page() {
       setUploading(true)
       setUploadMessage('Uploading…')
 
-      const filePath = makeUploadPath(user.id, 'step1', file)
+      const userId = user?.id || 'demo-user'
+      const filePath = makeUploadPath(userId, 'step1', file)
 
       const { data, error } = await supabase.storage
         .from('uploads')
@@ -165,8 +207,14 @@ function ChallengeStep1Page() {
 
   if (loading) return <p>Loading challenge step 1…</p>
 
-  // --- Styles ---
-  const overlayFrame = { position: 'relative', width: '100%', maxWidth: 320, margin: '0 auto' }
+  // -------- Styles --------
+  const overlayFrame = {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 320,
+    margin: '0 auto',
+  }
+
   const previewImageStyle = {
     width: '100%',
     aspectRatio: '3 / 4',
@@ -177,7 +225,16 @@ function ChallengeStep1Page() {
     background: '#000',
     display: 'block',
   }
-  const ovalMask = { position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+
+  const ovalMask = {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  }
+
   const oval = {
     width: '88%',
     height: '78%',
@@ -214,7 +271,13 @@ function ChallengeStep1Page() {
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Step 1: Getting Started</h1>
-      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
+      <hr
+        style={{
+          width: '50%',
+          margin: '0.5rem auto 1rem auto',
+          border: '0.5px solid #666',
+        }}
+      />
 
       <p style={{ marginBottom: '0.75rem', fontSize: '1rem', color: '#ddd' }}>
         Follow these steps before you take your photo:
@@ -238,7 +301,14 @@ function ChallengeStep1Page() {
       </ol>
 
       {/* Video */}
-      <div style={{ marginBottom: '2rem', width: '100%', aspectRatio: '16 / 9', position: 'relative' }}>
+      <div
+        style={{
+          marginBottom: '2rem',
+          width: '100%',
+          aspectRatio: '16 / 9',
+          position: 'relative',
+        }}
+      >
         <iframe
           src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
           style={{
@@ -258,7 +328,9 @@ function ChallengeStep1Page() {
       </div>
 
       {/* Compare */}
-      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>Compare Your Work</h3>
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
+        Compare Your Work
+      </h3>
 
       <div
         style={{
@@ -271,27 +343,42 @@ function ChallengeStep1Page() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Patrick’s Version</strong></p>
+          <p>
+            <strong>Patrick’s Version</strong>
+          </p>
           <div style={overlayFrame}>
-            <img src="/style_one/step1_reference.jpeg" alt="Patrick Step 1" style={previewImageStyle} />
+            <img
+              src="/style_one/step1_reference.jpeg"
+              alt="Patrick Step 1"
+              style={previewImageStyle}
+            />
           </div>
         </div>
 
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p><strong>Your Version</strong></p>
+          <p>
+            <strong>Your Version</strong>
+          </p>
           <div style={overlayFrame}>
             {hasImage ? (
-              <img src={previewUrl || imageUrl} alt="Your Version" style={previewImageStyle} />
+              <img
+                src={previewUrl || imageUrl}
+                alt="Your Version"
+                style={previewImageStyle}
+              />
             ) : (
               <div
                 style={{
                   ...previewImageStyle,
-                  background: 'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
+                  background:
+                    'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
                 }}
               />
             )}
 
-            <div style={ovalMask}><div style={oval} /></div>
+            <div style={ovalMask}>
+              <div style={oval} />
+            </div>
 
             {!hasImage && (
               <div
@@ -315,7 +402,7 @@ function ChallengeStep1Page() {
         </div>
       </div>
 
-      {/* CAMERA HELP – UPDATED */}
+      {/* CAMERA HELP */}
       <section
         style={{
           margin: '1.5rem auto 0',
@@ -346,8 +433,8 @@ function ChallengeStep1Page() {
             marginBottom: 4,
           }}
         >
-          When you tap <strong>“Take Photo / Choose Photo”</strong> you should see your camera open.  
-          If nothing happens, try this:
+          When you tap <strong>“Take Photo / Choose Photo”</strong> you should
+          see your camera open. If nothing happens, try this:
         </p>
 
         <ul
@@ -360,16 +447,17 @@ function ChallengeStep1Page() {
           }}
         >
           <li>
-            If you opened this from another app (Instagram, Facebook, some email apps),  
-            use that app’s menu and choose <strong>“Open in Safari”</strong> or <strong>“Open in Chrome”</strong>.
+            If you opened this from another app (Instagram, Facebook, some email apps),
+            use that app’s menu and choose <strong>“Open in Safari”</strong> or{' '}
+            <strong>“Open in Chrome”</strong>.
           </li>
           <li>
-            Check your browser permissions — look for a camera icon or  
-            “Permissions” in the address bar and choose <strong>Allow</strong>.
+            Check your browser permissions — look for a camera icon or “Permissions”
+            in the address bar and choose <strong>Allow</strong>.
           </li>
           <li>
-            If your camera still doesn’t open, take the photo using your normal camera app first.  
-            Then return here and try again.
+            If your camera still doesn’t open, take the photo using your normal
+            camera app first, then come back here and try again.
           </li>
         </ul>
 
@@ -415,7 +503,8 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Make sure the hairstyle fills the frame in <strong>portrait</strong> mode.
+            Make sure the hairstyle fills the frame in <strong>portrait</strong>{' '}
+            mode, with the head and hair inside the oval.
           </p>
 
           <button
@@ -435,7 +524,9 @@ function ChallengeStep1Page() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
+            {uploading
+              ? 'Uploading…'
+              : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
@@ -453,7 +544,14 @@ function ChallengeStep1Page() {
             textAlign: 'center',
           }}
         >
-          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
+          <h2
+            style={{
+              color: '#28a745',
+              fontSize: '1.5rem',
+              marginBottom: '0.75rem',
+              fontWeight: '700',
+            }}
+          >
             🎉 Great work!
           </h2>
           <p
@@ -464,8 +562,8 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Does this image show your <strong>best work</strong> for Step 1?  
-            If yes, you’re ready to continue your Style Challenge journey!
+            Does this image show your <strong>best work</strong> for Step 1? If
+            yes, you’re ready to continue your Style Challenge journey!
           </p>
 
           <button
@@ -510,6 +608,7 @@ function ChallengeStep1Page() {
   )
 }
 
+/** Suspense wrapper */
 export default function Step1Page() {
   return (
     <Suspense
