@@ -7,17 +7,35 @@ import { supabase } from '../../../lib/supabaseClient'
 
 export default function PermissionsPage() {
   const router = useRouter()
+
   const [user, setUser] = useState(null)
   const [choice, setChoice] = useState(null) // 'yes' | 'no' | null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [isMobile, setIsMobile] = useState(false)
 
-  // Load session + existing consent
+  // ---------- simple mobile detection for layout ----------
+  useEffect(() => {
+    const measure = () => {
+      if (typeof window === 'undefined') return
+      setIsMobile(window.innerWidth < 640)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
+
+  // ---------- load session + existing consent ----------
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.auth.getSession()
-      const sessionUser = data.session?.user
+      const { data, error } = await supabase.auth.getSession()
 
+      if (error) {
+        console.error('Error getting session:', error.message)
+        return
+      }
+
+      const sessionUser = data.session?.user
       if (!sessionUser) {
         router.push('/')
         return
@@ -25,51 +43,49 @@ export default function PermissionsPage() {
 
       setUser(sessionUser)
 
-      // Look up existing consent (if any)
-      const { data: rows, error: profileErr } = await supabase
+      // Check if they’ve already answered
+      const { data: profile, error: profErr } = await supabase
         .from('profiles')
-        .select('media_consent')
+        .select('marketing_consent')
         .eq('id', sessionUser.id)
-        .limit(1)
+        .maybeSingle()
 
-      if (profileErr) {
-        console.error('Error loading media_consent:', profileErr.message)
-        return
+      if (profErr) {
+        console.warn('Error loading profile for consent:', profErr.message)
       }
 
-      const mediaConsent =
-        rows && rows.length > 0 ? rows[0].media_consent : null
-
-      if (mediaConsent === true) setChoice('yes')
-      if (mediaConsent === false) setChoice('no')
+      const consent = profile?.marketing_consent
+      if (consent === true) setChoice('yes')
+      if (consent === false) setChoice('no')
     }
 
     load()
   }, [router])
 
+  // ---------- save choice ----------
   const saveChoice = async () => {
     if (!choice) {
       setError('Please choose one option.')
       return
     }
     if (!user) {
-      setError('You must be signed in to continue.')
+      setError('You need to be signed in to continue.')
       return
     }
 
     setSaving(true)
     setError('')
 
-    // Upsert so it also works for brand-new profiles
-    const { error: upsertErr } = await supabase.from('profiles').upsert({
-      id: user.id,
-      email: user.email ?? null,
-      media_consent: choice === 'yes',
-      media_consent_at: new Date().toISOString()
-    })
+    const { error: upsertErr } = await supabase
+      .from('profiles')
+      .update({
+        marketing_consent: choice === 'yes',
+        marketing_consent_at: new Date().toISOString()
+      })
+      .eq('id', user.id)
 
     if (upsertErr) {
-      console.error('Error saving media_consent:', upsertErr.message)
+      console.error('Error saving marketing_consent:', upsertErr.message)
       setError('Sorry, we could not save your choice. Please try again.')
       setSaving(false)
       return
@@ -82,9 +98,9 @@ export default function PermissionsPage() {
   return (
     <main
       style={{
-        maxWidth: 700,
+        maxWidth: 800,
         margin: '0 auto',
-        padding: '2rem 1rem',
+        padding: isMobile ? '1.5rem 1rem 2.5rem' : '2.25rem 1.5rem 3rem',
         color: '#fff',
         background: '#000',
         fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -92,13 +108,14 @@ export default function PermissionsPage() {
       }}
     >
       {/* Logo */}
-      <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+      <div style={{ textAlign: 'center', marginBottom: isMobile ? '1.25rem' : '1.75rem' }}>
         <Image
           src="/logo.jpeg"
           alt="Style Challenge Logo"
-          width={240}
+          width={isMobile ? 220 : 260}
           height={0}
-          style={{ height: 'auto' }}
+          style={{ height: 'auto', maxWidth: '100%' }}
+          priority
         />
       </div>
 
@@ -106,34 +123,50 @@ export default function PermissionsPage() {
       <div
         style={{
           display: 'flex',
-          gap: '1rem',
-          alignItems: 'flex-start',
-          marginBottom: '1.5rem'
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'center' : 'flex-start',
+          gap: isMobile ? '1rem' : '1.25rem',
+          marginBottom: isMobile ? '1.25rem' : '1.75rem',
+          textAlign: isMobile ? 'center' : 'left'
         }}
       >
         <img
           src="/press_shot.JPG"
           alt="Patrick Cameron"
           style={{
-            width: 110,
+            width: isMobile ? 140 : 120,
             height: 'auto',
             borderRadius: 12,
-            objectFit: 'cover'
+            objectFit: 'cover',
+            flexShrink: 0
           }}
         />
 
-        <div>
-          <h2 style={{ margin: 0, fontWeight: 800, fontSize: '1.5rem' }}>
+        <div style={{ maxWidth: 520 }}>
+          <h2
+            style={{
+              margin: 0,
+              fontWeight: 800,
+              fontSize: isMobile ? '1.35rem' : '1.6rem'
+            }}
+          >
             Hi, Patrick here.
           </h2>
-          <p style={{ marginTop: '0.5rem', lineHeight: 1.45, color: '#ddd' }}>
+          <p
+            style={{
+              marginTop: '0.6rem',
+              lineHeight: 1.5,
+              color: '#ddd',
+              fontSize: isMobile ? '0.96rem' : '1rem'
+            }}
+          >
             I’m really pleased you’re doing this Style Challenge.
             <br />
             <br />
             One of my favourite things is sharing the work of stylists and
             students from around the world — on Facebook, Instagram, TikTok,
-            my website and in classes. It inspires other hairdressers and
-            it’s a brilliant way to shine a light on <strong>your</strong> skills
+            my website and in classes. It inspires other hairdressers and it’s
+            a brilliant way to shine a light on <strong>your</strong> skills
             and your salon.
             <br />
             <br />
@@ -142,27 +175,34 @@ export default function PermissionsPage() {
             not affect your challenge, your feedback or your certificate.
             <br />
             <br />
-            If you ever change your mind later, just email me and my team at:{' '}
+            If you ever change your mind later, just email me and my team at{' '}
             <strong>info@accesslonghair.com</strong>.
           </p>
         </div>
       </div>
 
       {/* Consent options */}
-      <div style={{ marginTop: '1rem', color: '#eee' }}>
+      <div
+        style={{
+          marginTop: '0.5rem',
+          color: '#eee',
+          fontSize: isMobile ? '0.95rem' : '1rem'
+        }}
+      >
         <label
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: '0.6rem',
-            marginBottom: '1rem'
+            marginBottom: '1rem',
+            cursor: 'pointer'
           }}
         >
           <input
             type="checkbox"
             checked={choice === 'yes'}
             onChange={() => setChoice(choice === 'yes' ? null : 'yes')}
-            style={{ width: 20, height: 20 }}
+            style={{ width: 20, height: 20, marginTop: 3 }}
           />
           <span>
             <strong>Yes</strong> — I’m happy for Patrick and his team to use my
@@ -175,15 +215,16 @@ export default function PermissionsPage() {
         <label
           style={{
             display: 'flex',
-            alignItems: 'center',
-            gap: '0.6rem'
+            alignItems: 'flex-start',
+            gap: '0.6rem',
+            cursor: 'pointer'
           }}
         >
           <input
             type="checkbox"
             checked={choice === 'no'}
             onChange={() => setChoice(choice === 'no' ? null : 'no')}
-            style={{ width: 20, height: 20 }}
+            style={{ width: 20, height: 20, marginTop: 3 }}
           />
           <span>
             <strong>No</strong> — please keep my photos private. They can be
@@ -197,13 +238,20 @@ export default function PermissionsPage() {
         )}
       </div>
 
-      <p style={{ marginTop: '2rem', textAlign: 'center', color: '#bbb' }}>
+      <p
+        style={{
+          marginTop: '1.75rem',
+          textAlign: 'center',
+          color: '#bbb',
+          fontSize: isMobile ? '0.9rem' : '0.95rem'
+        }}
+      >
         Please choose one option above — you can still complete the challenge
         whichever you prefer.
       </p>
 
       {/* Save button */}
-      <div style={{ textAlign: 'center', marginTop: '1.5rem' }}>
+      <div style={{ textAlign: 'center', marginTop: '1.25rem' }}>
         <button
           onClick={saveChoice}
           disabled={saving}
@@ -213,9 +261,9 @@ export default function PermissionsPage() {
             border: 'none',
             borderRadius: 10,
             padding: '14px 22px',
-            fontSize: '1.1rem',
+            fontSize: '1.05rem',
             fontWeight: 700,
-            cursor: 'pointer',
+            cursor: saving ? 'default' : 'pointer',
             boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
             opacity: saving ? 0.7 : 1,
             minWidth: 260
