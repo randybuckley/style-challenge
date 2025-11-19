@@ -46,7 +46,7 @@ export default function PermissionsPage() {
       // Check if they’ve already answered
       const { data: profile, error: profErr } = await supabase
         .from('profiles')
-        .select('marketing_consent')
+        .select('media_consent')
         .eq('id', sessionUser.id)
         .maybeSingle()
 
@@ -54,7 +54,7 @@ export default function PermissionsPage() {
         console.warn('Error loading profile for consent:', profErr.message)
       }
 
-      const consent = profile?.marketing_consent
+      const consent = profile?.media_consent
       if (consent === true) setChoice('yes')
       if (consent === false) setChoice('no')
     }
@@ -79,13 +79,13 @@ export default function PermissionsPage() {
     const { error: upsertErr } = await supabase
       .from('profiles')
       .update({
-        marketing_consent: choice === 'yes',
-        marketing_consent_at: new Date().toISOString()
+        media_consent: choice === 'yes',
+        media_consent_at: new Date().toISOString()
       })
       .eq('id', user.id)
 
     if (upsertErr) {
-      console.error('Error saving marketing_consent:', upsertErr.message)
+      console.error('Error saving media_consent:', upsertErr.message)
       setError('Sorry, we could not save your choice. Please try again.')
       setSaving(false)
       return
