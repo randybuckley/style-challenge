@@ -38,7 +38,7 @@ function ChallengeStep1Page() {
     })
   }, [router, searchParams])
 
-  // When a user is known, try to load their latest saved Step 1 image
+  // Load last Step 1 image
   useEffect(() => {
     if (!user || adminDemo) return
 
@@ -62,7 +62,6 @@ function ChallengeStep1Page() {
           const fullUrl =
             `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${last.image_url}`
           setImageUrl(fullUrl)
-          // keep showOptions = false so they can either confirm or upload a new photo
         }
       }
     }
@@ -80,7 +79,6 @@ function ChallengeStep1Page() {
     setUploadMessage('')
   }
 
-  // Revoke previous object URL to avoid memory leaks
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -91,28 +89,23 @@ function ChallengeStep1Page() {
     e.preventDefault()
     if (uploading) return
 
-    // Demo: allow continue without an upload if an image already exists
     if (adminDemo && !file && imageUrl) {
       setUploadMessage('✅ Demo mode: using your existing photo.')
       setShowOptions(true)
       return
     }
 
-    // If there is neither a new file nor an existing saved image, block
     if (!file && !imageUrl) {
       setUploadMessage('Please select a photo first.')
       return
     }
 
-    // If there is no new file but we already have an imageUrl,
-    // just confirm and move on without uploading anything.
     if (!file && imageUrl) {
       setUploadMessage('✅ Using your existing photo for Step 1.')
       setShowOptions(true)
       return
     }
 
-    // From here on, we know we have a NEW file to upload
     if (!user && !adminDemo) {
       setUploadMessage('There was a problem with your session. Please sign in again.')
       return
@@ -124,7 +117,6 @@ function ChallengeStep1Page() {
 
       const filePath = makeUploadPath(user.id, 'step1', file)
 
-      // Upload to Storage
       const { data, error } = await supabase.storage
         .from('uploads')
         .upload(filePath, file)
@@ -137,7 +129,6 @@ function ChallengeStep1Page() {
 
       const path = data?.path || filePath
 
-      // Insert DB row (non-demo only)
       if (!adminDemo && user) {
         const { error: dbError } = await supabase
           .from('uploads')
@@ -174,14 +165,8 @@ function ChallengeStep1Page() {
 
   if (loading) return <p>Loading challenge step 1…</p>
 
-  // --- oval overlay styles ---
-  const overlayFrame = {
-    position: 'relative',
-    width: '100%',
-    maxWidth: 320,
-    margin: '0 auto',
-  }
-
+  // --- Styles ---
+  const overlayFrame = { position: 'relative', width: '100%', maxWidth: 320, margin: '0 auto' }
   const previewImageStyle = {
     width: '100%',
     aspectRatio: '3 / 4',
@@ -192,23 +177,13 @@ function ChallengeStep1Page() {
     background: '#000',
     display: 'block',
   }
-
-  const ovalMask = {
-    position: 'absolute',
-    inset: 0,
-    pointerEvents: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }
-
-  // Softer vignette
+  const ovalMask = { position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }
   const oval = {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
     boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
-    outline: '1200px solid rgba(0,0,0,0.22)', // was 2000px @ 0.45
+    outline: '1200px solid rgba(0,0,0,0.22)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -221,9 +196,9 @@ function ChallengeStep1Page() {
         padding: '2rem',
         fontFamily: 'sans-serif',
         textAlign: 'center',
-        backgroundColor: '#000',   // force dark canvas
-        color: '#fff',             // base text colour
-        minHeight: '100vh',        // fill viewport so black covers everything
+        backgroundColor: '#000',
+        color: '#fff',
+        minHeight: '100vh',
       }}
     >
       {/* Logo */}
@@ -239,27 +214,14 @@ function ChallengeStep1Page() {
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Step 1: Getting Started</h1>
-      <hr
-        style={{
-          width: '50%',
-          margin: '0.5rem auto 1rem auto',
-          border: '0.5px solid #666',
-        }}
-      />
+      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
 
-      {/* Step-by-step instructions */}
-      <p
-        style={{
-          marginBottom: '0.75rem',
-          fontSize: '1rem',
-          color: '#ddd',
-        }}
-      >
+      <p style={{ marginBottom: '0.75rem', fontSize: '1rem', color: '#ddd' }}>
         Follow these steps before you take your photo:
       </p>
+
       <ol
         style={{
-          margin: '0 0 1.5rem',
           paddingLeft: '1.2rem',
           textAlign: 'left',
           color: '#ddd',
@@ -267,32 +229,16 @@ function ChallengeStep1Page() {
           maxWidth: 520,
           marginInline: 'auto',
           lineHeight: 1.5,
+          marginBottom: '2rem',
         }}
       >
         <li>Watch Patrick’s demo for Step 1.</li>
         <li>Prepare your mannequin or model so the style matches Patrick’s shape and balance.</li>
         <li>Position the camera so the head and hair fill the oval frame.</li>
       </ol>
-      <p
-        style={{
-          marginBottom: '2rem',
-          fontSize: '1rem',
-          color: '#ddd',
-        }}
-      >
-        <strong>Important:</strong> Hold your phone <strong>upright (portrait)</strong>{' '}
-        and fill the frame with the hairstyle — top to bottom — so it looks great in your portfolio.
-      </p>
 
       {/* Video */}
-      <div
-        style={{
-          marginBottom: '2rem',
-          width: '100%',
-          aspectRatio: '16 / 9',
-          position: 'relative',
-        }}
-      >
+      <div style={{ marginBottom: '2rem', width: '100%', aspectRatio: '16 / 9', position: 'relative' }}>
         <iframe
           src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
           style={{
@@ -311,10 +257,9 @@ function ChallengeStep1Page() {
         />
       </div>
 
-      {/* Compare Section */}
-      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
-        Compare Your Work
-      </h3>
+      {/* Compare */}
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>Compare Your Work</h3>
+
       <div
         style={{
           display: 'flex',
@@ -328,11 +273,7 @@ function ChallengeStep1Page() {
         <div style={{ flex: 1, minWidth: 200 }}>
           <p><strong>Patrick’s Version</strong></p>
           <div style={overlayFrame}>
-            <img
-              src="/style_one/step1_reference.jpeg"
-              alt="Patrick Version Step 1"
-              style={previewImageStyle}
-            />
+            <img src="/style_one/step1_reference.jpeg" alt="Patrick Step 1" style={previewImageStyle} />
           </div>
         </div>
 
@@ -340,25 +281,17 @@ function ChallengeStep1Page() {
           <p><strong>Your Version</strong></p>
           <div style={overlayFrame}>
             {hasImage ? (
-              <img
-                src={previewUrl || imageUrl}
-                alt="Your Version"
-                style={previewImageStyle}
-              />
+              <img src={previewUrl || imageUrl} alt="Your Version" style={previewImageStyle} />
             ) : (
               <div
                 style={{
                   ...previewImageStyle,
-                  // lighter placeholder so the whole page feels less "dim"
-                  background:
-                    'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
+                  background: 'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
                 }}
               />
             )}
 
-            <div style={ovalMask}>
-              <div style={oval} />
-            </div>
+            <div style={ovalMask}><div style={oval} /></div>
 
             {!hasImage && (
               <div
@@ -382,7 +315,7 @@ function ChallengeStep1Page() {
         </div>
       </div>
 
-      {/* Camera help – for in-app browser / permissions issues */}
+      {/* CAMERA HELP – UPDATED */}
       <section
         style={{
           margin: '1.5rem auto 0',
@@ -404,6 +337,7 @@ function ChallengeStep1Page() {
         >
           If your camera doesn’t appear
         </h3>
+
         <p
           style={{
             fontSize: '0.85rem',
@@ -412,9 +346,10 @@ function ChallengeStep1Page() {
             marginBottom: 4,
           }}
         >
-          When you tap <strong>“Take Photo / Choose Photo”</strong> you should
-          see your camera or photo library. If nothing happens, try this:
+          When you tap <strong>“Take Photo / Choose Photo”</strong> you should see your camera open.  
+          If nothing happens, try this:
         </p>
+
         <ul
           style={{
             margin: '0 0 4px 18px',
@@ -425,29 +360,21 @@ function ChallengeStep1Page() {
           }}
         >
           <li>
-            If you opened this from another app (Instagram, Facebook, some email
-            apps), use that app’s menu and choose{' '}
-            <strong>“Open in Safari”</strong> or <strong>“Open in Chrome”</strong>.
+            If you opened this from another app (Instagram, Facebook, some email apps),  
+            use that app’s menu and choose <strong>“Open in Safari”</strong> or <strong>“Open in Chrome”</strong>.
           </li>
           <li>
-            Check your browser permissions — look for a camera icon or
+            Check your browser permissions — look for a camera icon or  
             “Permissions” in the address bar and choose <strong>Allow</strong>.
           </li>
           <li>
-            If the live camera still won’t open, take the photo with your normal
-            camera app first, then choose <strong>Photo Library</strong> /
-            <strong>Choose Photo</strong> and upload it from your gallery.
+            If your camera still doesn’t open, take the photo using your normal camera app first.  
+            Then return here and try again.
           </li>
         </ul>
-        <p
-          style={{
-            fontSize: '0.8rem',
-            color: '#aaaaaa',
-            margin: 0,
-          }}
-        >
-          The camera is only used when you choose to take or upload a photo —
-          never in the background.
+
+        <p style={{ fontSize: '0.8rem', color: '#aaaaaa', margin: 0 }}>
+          The camera is only used when you choose to take a photo — never in the background.
         </p>
       </section>
 
@@ -485,12 +412,10 @@ function ChallengeStep1Page() {
               fontSize: '1rem',
               color: '#fff',
               lineHeight: '1.4',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
               marginBottom: '1rem',
             }}
           >
-            Make sure the hairstyle fills the frame in <strong>portrait</strong>{' '}
-            mode, with the head and hair inside the oval.
+            Make sure the hairstyle fills the frame in <strong>portrait</strong> mode.
           </p>
 
           <button
@@ -528,14 +453,7 @@ function ChallengeStep1Page() {
             textAlign: 'center',
           }}
         >
-          <h2
-            style={{
-              color: '#28a745',
-              fontSize: '1.5rem',
-              marginBottom: '0.75rem',
-              fontWeight: '700',
-            }}
-          >
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>
             🎉 Great work!
           </h2>
           <p
@@ -543,7 +461,6 @@ function ChallengeStep1Page() {
               fontSize: '1.1rem',
               color: '#fff',
               lineHeight: '1.5',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
               marginBottom: '1rem',
             }}
           >
@@ -593,7 +510,6 @@ function ChallengeStep1Page() {
   )
 }
 
-/** Suspense wrapper required for components that call useSearchParams(). */
 export default function Step1Page() {
   return (
     <Suspense
