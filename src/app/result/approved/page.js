@@ -18,15 +18,15 @@ function ApprovedResultInner() {
       return
     }
     if (!userEmail) {
-      alert('Sorry, we are missing your email address for this certificate link.')
+      alert(
+        'Sorry, we are missing your email address for this certificate link.'
+      )
       return
     }
 
     setBusy(true)
     try {
-      //
       // 1) Fetch certificate metadata from our API
-      //
       const metaRes = await fetch('/api/review-certification', {
         method: 'POST',
         headers: {
@@ -41,7 +41,7 @@ function ApprovedResultInner() {
         console.error('Metadata error:', metaRes.status, text)
         alert(
           'Sorry, we could not prepare your certificate details.\n\n' +
-          (text || `Status: ${metaRes.status}`)
+            (text || `Status: ${metaRes.status}`)
         )
         return
       }
@@ -51,14 +51,12 @@ function ApprovedResultInner() {
         console.error('Metadata payload error:', meta)
         alert(
           'Sorry, we could not prepare your certificate details.\n\n' +
-          (meta?.error || 'Unknown metadata error')
+            (meta?.error || 'Unknown metadata error')
         )
         return
       }
 
-      //
       // 2) Ask the server to generate the PDF
-      //
       const pdfRes = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -73,7 +71,7 @@ function ApprovedResultInner() {
         console.error('PDF generation error:', pdfRes.status, text)
         alert(
           'Sorry, there was a problem generating your certificate PDF.\n\n' +
-          (text || `Status: ${pdfRes.status}`)
+            (text || `Status: ${pdfRes.status}`)
         )
         return
       }
@@ -102,23 +100,46 @@ function ApprovedResultInner() {
       console.error('Unexpected error while preparing certificate:', err)
       alert(
         'Sorry, something went wrong while preparing your certificate.\n\n' +
-        (err?.message || String(err))
+          (err?.message || String(err))
       )
     } finally {
       setBusy(false)
     }
   }
 
+  // ---- styles ----
   const pageShell = {
     minHeight: '100vh',
     background: '#111',
     color: '#eaeaea',
-    padding: '16px 12px',
+    padding: '16px 12px 32px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     fontFamily:
       'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+  }
+
+  const headerLogoWrap = {
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 12,
+  }
+
+  const logoStyle = {
+    width: 200,
+    height: 'auto',
+  }
+
+  const videoFrame = {
+    width: 'min(900px, 96vw)',
+    margin: '0 auto 18px auto',
+    borderRadius: 16,
+    overflow: 'hidden',
+    background: '#000',
+    aspectRatio: '16 / 9',
+    position: 'relative',
+    border: '1px solid #2b2b2b',
   }
 
   const card = {
@@ -131,15 +152,8 @@ function ApprovedResultInner() {
     textAlign: 'center',
   }
 
-  const logoStyle = {
-    width: 180,
-    height: 'auto',
-    borderRadius: 12,
-    marginBottom: 10,
-  }
-
   const btn = {
-    marginTop: 18,
+    marginTop: 16,
     background: '#28a745',
     color: '#fff',
     border: 'none',
@@ -149,19 +163,50 @@ function ApprovedResultInner() {
     cursor: busy ? 'default' : 'pointer',
     opacity: busy ? 0.7 : 1,
     boxShadow: '0 10px 22px rgba(0,0,0,.25)',
+    minWidth: 220,
+  }
+
+  const infoStrip = {
+    margin: '14px auto 4px',
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: '1px solid #333',
+    background: '#101010',
+    textAlign: 'left',
+    maxWidth: 520,
+    display: 'flex',
+    gap: 10,
+    alignItems: 'flex-start',
+    fontSize: 13,
+    color: '#dcdcdc',
+  }
+
+  const bulletIcon = {
+    width: 26,
+    height: 26,
+    borderRadius: '50%',
+    border: '1px solid #28a745',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 16,
+    color: '#28a745',
+    flexShrink: 0,
+    marginTop: 2,
   }
 
   const tiny = {
     marginTop: 10,
     fontSize: 11,
-    color: '#999',
+    color: '#777',
     userSelect: 'all',
     wordBreak: 'break-all',
   }
 
   return (
     <main style={pageShell}>
-      <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 12 }}>
+      {/* Logo header */}
+      <div style={headerLogoWrap}>
         <img
           src="/logo.jpeg"
           alt="Patrick Cameron — Style Challenge"
@@ -169,34 +214,45 @@ function ApprovedResultInner() {
         />
       </div>
 
+      {/* Vimeo: Patrick's congratulations */}
+      <div style={videoFrame}>
+        <iframe
+          src="https://player.vimeo.com/video/1138761655?badge=0&autopause=0&player_id=0&app_id=58479"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            border: 'none',
+          }}
+          frameBorder="0"
+          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allowFullScreen
+          title="Congratulations from Patrick"
+        />
+      </div>
+
+      {/* Certificate card */}
       <div style={card}>
         <h1 style={{ margin: '4px 0 10px' }}>Congratulations!</h1>
-        <p style={{ margin: '0 0 14px', color: '#dcdcdc', lineHeight: 1.4 }}>
+        <p style={{ margin: '0 0 10px', color: '#dcdcdc', lineHeight: 1.4 }}>
           Patrick has approved your Style Challenge submission.
-          Keep building your long-hair artistry—this is just the start.
+          <br />
+          Keep building your long-hair artistry — this is just the start.
         </p>
 
-        <div
-          style={{
-            margin: '18px auto 14px',
-            padding: '18px 14px',
-            borderRadius: 12,
-            border: '1px dashed #333',
-            background: '#000',
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#777',
-          }}
-        >
+        <div style={infoStrip}>
+          <div style={bulletIcon}>✓</div>
           <div>
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>
-              Your certificate is ready
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              Your certificate is ready to download.
             </div>
-            <div style={{ fontSize: 13 }}>
-              Click the button below and we&apos;ll prepare a printable
-              PDF certificate for you to download.
+            <div>
+              Click the button below and we&apos;ll prepare a printable PDF
+              certificate with your name and challenge details. You can save it,
+              print it, or share it online.
             </div>
           </div>
         </div>
@@ -210,6 +266,7 @@ function ApprovedResultInner() {
           {busy ? 'Preparing your certificate…' : 'Download your certificate'}
         </button>
 
+        {/* token + email for debugging / support */}
         <div style={tiny}>
           token: {token || '(missing)'}
           {userEmail && (
@@ -224,7 +281,7 @@ function ApprovedResultInner() {
   )
 }
 
-// Suspense wrapper so useSearchParams is allowed during prerender
+// Suspense wrapper so useSearchParams is allowed
 export default function ApprovedResultPage() {
   return (
     <Suspense

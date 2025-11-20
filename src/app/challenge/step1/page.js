@@ -49,7 +49,7 @@ function ChallengeStep1Page() {
       if (sessionUser && !isAdminDemo) {
         const { data: profile, error: profErr } = await supabase
           .from('profiles')
-          .select('media_consent')              // 👈 use media_consent
+          .select('media_consent')
           .eq('id', sessionUser.id)
           .maybeSingle()
 
@@ -57,7 +57,7 @@ function ChallengeStep1Page() {
           console.warn('Error loading profile for consent check:', profErr.message)
         }
 
-        const consent = profile?.media_consent   // 👈 read media_consent
+        const consent = profile?.media_consent
 
         // If media_consent is null/undefined → send to permissions page
         if (consent === null || typeof consent === 'undefined') {
@@ -239,8 +239,8 @@ function ChallengeStep1Page() {
     width: '88%',
     height: '78%',
     borderRadius: '50%',
-    boxShadow: '0 0 0 3px rgba(255,255,255,0.9)',
-    outline: '1200px solid rgba(0,0,0,0.22)',
+    boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
+    outline: '1200px solid rgba(0, 0, 0, 0.22)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
@@ -296,7 +296,10 @@ function ChallengeStep1Page() {
         }}
       >
         <li>Watch Patrick’s demo for Step 1.</li>
-        <li>Prepare your mannequin or model so the style matches Patrick’s shape and balance.</li>
+        <li>
+          Prepare your mannequin or model so the style matches Patrick’s shape
+          and balance.
+        </li>
         <li>Position the camera so the head and hair fill the oval frame.</li>
       </ol>
 
@@ -305,12 +308,12 @@ function ChallengeStep1Page() {
         style={{
           marginBottom: '2rem',
           width: '100%',
-          aspectRatio: '16 / 9',
           position: 'relative',
+          paddingTop: '56.25%', // 16:9
         }}
       >
         <iframe
-          src="https://player.vimeo.com/video/1096804604?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
+          src="https://player.vimeo.com/video/1138763970?badge=0&autopause=0&player_id=0&app_id=58479"
           style={{
             position: 'absolute',
             top: 0,
@@ -322,13 +325,20 @@ function ChallengeStep1Page() {
           }}
           frameBorder="0"
           allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+          referrerPolicy="strict-origin-when-cross-origin"
           allowFullScreen
-          title="SC Video 1"
+          title="Style 1 Step 1"
         />
       </div>
 
       {/* Compare */}
-      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
+      <h3
+        style={{
+          fontSize: '1.3rem',
+          marginBottom: '1rem',
+          marginTop: '2rem',
+        }}
+      >
         Compare Your Work
       </h3>
 
@@ -402,70 +412,6 @@ function ChallengeStep1Page() {
         </div>
       </div>
 
-      {/* CAMERA HELP */}
-      <section
-        style={{
-          margin: '1.5rem auto 0',
-          maxWidth: 520,
-          textAlign: 'left',
-          backgroundColor: '#151515',
-          borderRadius: 10,
-          padding: '10px 12px',
-          border: '1px solid #333',
-        }}
-      >
-        <h3
-          style={{
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            marginBottom: 6,
-            color: '#f5f5f5',
-          }}
-        >
-          If your camera doesn’t appear
-        </h3>
-
-        <p
-          style={{
-            fontSize: '0.85rem',
-            lineHeight: 1.4,
-            color: '#dddddd',
-            marginBottom: 4,
-          }}
-        >
-          When you tap <strong>“Take Photo / Choose Photo”</strong> you should
-          see your camera open. If nothing happens, try this:
-        </p>
-
-        <ul
-          style={{
-            margin: '0 0 4px 18px',
-            padding: 0,
-            fontSize: '0.85rem',
-            lineHeight: 1.4,
-            color: '#dddddd',
-          }}
-        >
-          <li>
-            If you opened this from another app (Instagram, Facebook, some email apps),
-            use that app’s menu and choose <strong>“Open in Safari”</strong> or{' '}
-            <strong>“Open in Chrome”</strong>.
-          </li>
-          <li>
-            Check your browser permissions — look for a camera icon or “Permissions”
-            in the address bar and choose <strong>Allow</strong>.
-          </li>
-          <li>
-            If your camera still doesn’t open, take the photo using your normal
-            camera app first, then come back here and try again.
-          </li>
-        </ul>
-
-        <p style={{ fontSize: '0.8rem', color: '#aaaaaa', margin: 0 }}>
-          The camera is only used when you choose to take a photo — never in the background.
-        </p>
-      </section>
-
       {/* Upload Section */}
       {!showOptions && !adminDemo && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
@@ -493,6 +439,73 @@ function ChallengeStep1Page() {
               style={{ display: 'none' }}
             />
           </label>
+
+          {/* CAMERA HELP — now directly under the Take Photo control */}
+          <section
+            style={{
+              margin: '1rem auto 0',
+              maxWidth: 520,
+              textAlign: 'left',
+              backgroundColor: '#151515',
+              borderRadius: 10,
+              padding: '10px 12px',
+              border: '1px solid #333',
+            }}
+          >
+            <h3
+              style={{
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                marginBottom: 6,
+                color: '#f5f5f5',
+              }}
+            >
+              If your camera doesn’t appear
+            </h3>
+
+            <p
+              style={{
+                fontSize: '0.85rem',
+                lineHeight: 1.4,
+                color: '#dddddd',
+                marginBottom: 4,
+              }}
+            >
+              When you tap <strong>“Take Photo / Choose Photo”</strong> you
+              should see your camera open. If nothing happens, try this:
+            </p>
+
+            <ul
+              style={{
+                margin: '0 0 4px 18px',
+                padding: 0,
+                fontSize: '0.85rem',
+                lineHeight: 1.4,
+                color: '#dddddd',
+              }}
+            >
+              <li>
+                If you opened this from another app (Instagram, Facebook, some
+                email apps), use that app’s menu and choose{' '}
+                <strong>“Open in Safari”</strong> or{' '}
+                <strong>“Open in Chrome”</strong>.
+              </li>
+              <li>
+                Check your browser permissions — look for a camera icon or
+                “Permissions” in the address bar and choose{' '}
+                <strong>Allow</strong>.
+              </li>
+              <li>
+                If your camera still doesn’t open, take the photo using your
+                normal camera app first, then come back here and try again.
+              </li>
+            </ul>
+
+            <p style={{ fontSize: '0.8rem', color: '#aaaaaa', margin: 0 }}>
+              The camera is only used when you choose to take a photo — never in
+              the background.
+            </p>
+          </section>
 
           <p
             style={{
@@ -558,7 +571,7 @@ function ChallengeStep1Page() {
             style={{
               fontSize: '1.1rem',
               color: '#fff',
-              lineHeight: '1.5',
+              lineHeight: 1.5,
               marginBottom: '1rem',
             }}
           >

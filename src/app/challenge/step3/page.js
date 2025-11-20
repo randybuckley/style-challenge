@@ -262,32 +262,33 @@ function ChallengeStep3Inner() {
         Watch Patrick’s demo for Step&nbsp;3, then capture your final working image.
       </p>
 
-      {/* Video */}
-      <div
-        style={{
-          marginBottom: '2rem',
-          width: '100%',
-          aspectRatio: '16 / 9',
-          position: 'relative',
-        }}
-      >
-        <iframe
-          src="https://player.vimeo.com/video/1096804473?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            border: '2px solid #555',
-            borderRadius: '6px',
-          }}
-          frameBorder="0"
-          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
-          allowFullScreen
-          title="SC Video 3"
-        />
-      </div>
+{/* Video */}
+<div
+  style={{
+    marginBottom: '2rem',
+    width: '100%',
+    position: 'relative',
+    paddingTop: '56.25%', // 16:9
+  }}
+>
+  <iframe
+    src="https://player.vimeo.com/video/1138769636?badge=0&autopause=0&player_id=0&app_id=58479"
+    style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      border: '2px solid #555',
+      borderRadius: '6px',
+    }}
+    frameBorder="0"
+    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+    referrerPolicy="strict-origin-when-cross-origin"
+    allowFullScreen
+    title="SC style 1 Step 3"
+  />
+</div>
 
       {/* Compare section */}
       <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
