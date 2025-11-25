@@ -1,8 +1,11 @@
+// src/app/api/generate/route.js
 import { NextResponse } from 'next/server'
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import { PDFDocument, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { readFile } from 'fs/promises'
 import path from 'path'
+
+export const dynamic = 'force-dynamic'
 
 const safe = (v) => (v == null ? '' : String(v))
 
@@ -10,258 +13,152 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
 
-    const stylistName   = safe(body.stylistName)
-    const salonName     = safe(body.salonName)
-    const styleName     = safe(body.styleName)
-    const date          = safe(body.date)
-    const certificateId = safe(body.certificateId)
+    const stylistName   = safe(body.stylistName)   // required
+    const styleName     = safe(body.styleName)     // required
+    const date          = safe(body.date)          // required
+    const certificateId = safe(body.certificateId) // required
+    // salonName intentionally unused for now
 
     if (!stylistName || !styleName || !date || !certificateId) {
       return NextResponse.json(
-        { ok: false, error: 'Missing required fields' },
+        { ok: false, error: 'Missing required fields.' },
         { status: 400 }
       )
     }
 
+    const certAsset = (p) => path.join(process.cwd(), 'public', 'cert', p)
+    const fontAsset = (p) => path.join(process.cwd(), 'public', 'fonts', p)
+
+    // --- Background artwork ---
+    const certPngBytes = await readFile(certAsset('certificate.png'))
+
     const pdf = await PDFDocument.create()
     pdf.registerFontkit(fontkit)
 
-    const page = pdf.addPage([842, 595]) // A4 landscape
+    const certImage = await pdf.embedPng(certPngBytes)
+    const page = pdf.addPage([certImage.width, certImage.height])
     const { width, height } = page.getSize()
-    const margin = 40
-    const inset = 10
 
-    const black = rgb(0, 0, 0)
-    const dark  = rgb(0.15, 0.15, 0.15)
-
-    const innerLeft   = margin + inset
-    const innerRight  = width  - margin - inset
-    const innerTop    = height - margin - inset
-    const innerBottom = margin + inset
-
-    const asset = (p) => path.join(process.cwd(), 'public', p)
-
-    // ---------- FONTS ----------
-    const cursiveFontFile = 'fonts/Parisienne/Parisienne-Regular.ttf'
-    const cursiveBytes    = await readFile(asset(cursiveFontFile))
-
-    const serif      = await pdf.embedFont(StandardFonts.TimesRoman)
-    const serifBold  = await pdf.embedFont(StandardFonts.TimesRomanBold)
-    const cursive    = await pdf.embedFont(cursiveBytes)
-
-    const tw = (text, size, font) => font.widthOfTextAtSize(text, size)
-    const cx = (text, size, font) => (width - tw(text, size, font)) / 2
-
-    // ---------- OUTER BORDER ----------
-    page.drawRectangle({
-      x: margin,
-      y: margin,
-      width: width - margin * 2,
-      height: height - margin * 2,
-      borderColor: dark,
-      borderWidth: 1.2
+    page.drawImage(certImage, {
+      x: 0,
+      y: 0,
+      width,
+      height,
     })
 
-    // ---------- INNER FRAME ----------
-    page.drawRectangle({
-      x: margin + 6,
-      y: margin + 6,
-      width: width - (margin + 6) * 2,
-      height: height - (margin + 6) * 2,
-      borderColor: rgb(0.8, 0.8, 0.8),
-      borderWidth: 0.6
-    })
+    // --- Fonts (Montserrat) ---
+    const montserratBytes = await readFile(
+      fontAsset('Montserrat-VariableFont_wght.ttf')
+    )
+    const montserratBoldBytes = await readFile(
+      fontAsset('Montserrat-Bold.ttf')
+    )
 
-    // ---------- LOGO (TOP LEFT) ----------
-    try {
-      const buf = await readFile(asset('logo.jpeg'))
-      const img = await pdf.embedJpg(buf)
-      const sealW = 110
-      const sealH = (img.height / img.width) * sealW
-      page.drawImage(img, {
-        x: innerLeft + 5,
-        y: innerTop - sealH - 5,
-        width: sealW,
-        height: sealH
+    const montserrat = await pdf.embedFont(montserratBytes)
+    const montserratBold = await pdf.embedFont(montserratBoldBytes)
+
+    const baseFont = montserrat
+    const baseBold = montserratBold
+    const colour = rgb(0, 0, 0)
+
+    const textWidth = (text, size, font) =>
+      font.widthOfTextAtSize(text, size)
+
+    const centerX = (text, size, font) =>
+      (width - textWidth(text, size, font)) / 2
+
+    // Points per cm
+    const CM = 28.3465
+
+    // --- Sizes ---
+    const titleSize  = height * 0.025    // “This certifies that”
+    const nameSize   = height * 0.035    // STYLIST NAME
+    const bodySize   = height * 0.020    // body lines
+    const footerSize = height * 0.015    // footer block
+
+    const lineGap = bodySize * 1.4
+
+    // =====================================================
+    // 1) MAIN CENTRE BLOCK — “This certifies that…”
+    // =====================================================
+    const line1 = 'This certifies that'
+    const nameLine = stylistName.toUpperCase()
+    const line3 = 'has successfully completed'
+    const line4 = styleName
+
+    const lines = [
+      { text: line1,    size: titleSize, font: baseFont },
+      { text: nameLine, size: nameSize,  font: baseBold },
+      { text: line3,    size: bodySize,  font: baseFont },
+      { text: line4,    size: bodySize,  font: baseBold },
+    ]
+
+    const totalBlockHeight =
+      lines.reduce((sum, l) => sum + l.size, 0) +
+      lineGap * (lines.length - 1)
+
+    // Existing overall block position (do not change)
+    const blockCentreY = height * 0.42 - 22 * CM
+    let y = blockCentreY + totalBlockHeight / 2
+
+    for (const line of lines) {
+      // Lift the two middle lines ("has successfully completed" and styleName)
+      // by 1 cm relative to the rest of the block.
+      let yAdjusted = y
+      if (line.text === line3 || line.text === line4) {
+        yAdjusted += 1 * CM
+      }
+
+      page.drawText(line.text, {
+        x: centerX(line.text, line.size, line.font),
+        y: yAdjusted,
+        size: line.size,
+        font: line.font,
+        color: colour,
       })
-    } catch {
-      // optional
+
+      y -= line.size + lineGap
     }
 
-    // ---------- HEADINGS ----------
-    const h1 = 'PATRICK CAMERON ACADEMY'
-    const h2 = 'CERTIFICATE OF ACHIEVEMENT'
+    // =====================================================
+    // 2) BOTTOM-LEFT FOOTER BLOCK — Awarded / Certificate
+    // =====================================================
+    const footerX = width * 0.16
+    const footerBaseY = height * 0.14 - 6 * CM // existing offset
 
-    const h1Y = innerTop - 40
-    page.drawText(h1, {
-      x: cx(h1, 20, serifBold),
-      y: h1Y,
-      size: 20,
-      font: serifBold,
-      color: black
-    })
+    const footerLines = [
+      `Awarded: ${date}`,
+      `Certificate: ${certificateId}`,
+    ]
 
-    const ruleY = h1Y - 24
-    page.drawLine({
-      start: { x: innerLeft, y: ruleY },
-      end:   { x: innerRight, y: ruleY },
-      thickness: 1,
-      color: dark
-    })
+    let fy = footerBaseY + footerLines.length * (footerSize + 2)
 
-    const h2Y = ruleY - 40
-    page.drawText(h2, {
-      x: cx(h2, 32, serifBold),
-      y: h2Y,
-      size: 32,
-      font: serifBold,
-      color: black
-    })
-
-    // ---------- PATRICK PORTRAIT (BOTTOM LEFT, +25%) ----------
-    // Draw this BEFORE the body text so text sits in front.
-    try {
-      const buf = await readFile(asset('cert/pencil.png'))
-      const img = await pdf.embedPng(buf)
-      const wP = 215            // slightly larger than original
-      const hP = (img.height / img.width) * wP
-      page.drawImage(img, {
-        x: innerLeft + 5,
-        y: innerBottom + 10,
-        width: wP,
-        height: hP
+    for (const text of footerLines) {
+      page.drawText(text, {
+        x: footerX,
+        y: fy,
+        size: footerSize,
+        font: baseFont,
+        color: colour,
       })
-    } catch {
-      // optional
+      fy -= footerSize + 2
     }
 
-    // ---------- BODY TEXT (TIDIED SPACING) ----------
-    const l1  = 'This certifies that'
-    const name = stylistName.toUpperCase()
-    const l2  = salonName ? `of ${salonName}` : ''
-    const l3a = 'has successfully completed the Style Challenge:'
-    const l3b = styleName
+    // --- Save & return ---
+    const pdfBytes = await pdf.save()
 
-    let y = h2Y - 105
+    const stylistSlug = stylistName.replace(/\s+/g, '_')
+    const styleSlug = styleName.replace(/\s+/g, '_')
+    const fileName = `Certificate_${stylistSlug}_${styleSlug}.pdf`
 
-    // cursive intro
-    page.drawText(l1, {
-      x: cx(l1, 22, cursive),
-      y: y + 16,
-      size: 22,
-      font: cursive,
-      color: black
-    })
-
-    y -= 28
-    page.drawText(name, {
-      x: cx(name, 26, serifBold),
-      y,
-      size: 26,
-      font: serifBold,
-      color: black
-    })
-
-    y -= 22
-    if (l2) {
-      page.drawText(l2, {
-        x: cx(l2, 14, serif),
-        y,
-        size: 14,
-        font: serif,
-        color: black
-      })
-      y -= 22
-    }
-
-    page.drawText(l3a, {
-      x: cx(l3a, 20, cursive),
-      y,
-      size: 20,
-      font: cursive,
-      color: black
-    })
-
-    y -= 22
-    page.drawText(l3b, {
-      x: cx(l3b, 14, serif),
-      y,
-      size: 14,
-      font: serif,
-      color: black
-    })
-
-    // ---------- FOOTER RULE ----------
-    const footerRuleY = innerBottom + 70
-    page.drawLine({
-      start: { x: innerLeft, y: footerRuleY },
-      end:   { x: innerRight, y: footerRuleY },
-      thickness: 1,
-      color: dark
-    })
-
-    // ---------- SIGNATURE + FOOTER TEXT ----------
-    const footerBlockWidth = 260
-    const rx = innerRight - footerBlockWidth
-    const printedName = 'Patrick Cameron'
-
-    // Signature slightly lower than before
-    try {
-      const buf = await readFile(asset('cert/signature.png'))
-      const img = await pdf.embedPng(buf)
-      const sigW = 300
-      const sigH = (img.height / img.width) * sigW
-      const nameWidth = tw(printedName, 16, serifBold)
-      const nameCenterX = rx + nameWidth / 2
-      const sigX = nameCenterX - sigW / 2
-      const nameBaselineY = footerRuleY - 26
-      const sigY = nameBaselineY + 6   // slightly closer to the printed name
-      page.drawImage(img, {
-        x: sigX,
-        y: sigY,
-        width: sigW,
-        height: sigH
-      })
-    } catch {
-      // optional
-    }
-
-    page.drawText(printedName, {
-      x: rx,
-      y: footerRuleY - 26,
-      size: 16,
-      font: serifBold,
-      color: black
-    })
-
-    page.drawText(`Awarded on ${date}`, {
-      x: rx,
-      y: footerRuleY - 42,
-      size: 12,
-      font: serif,
-      color: black
-    })
-
-    page.drawText(`Certificate No. ${certificateId}`, {
-      x: rx,
-      y: footerRuleY - 58,
-      size: 12,
-      font: serif,
-      color: black
-    })
-
-    // ---------- SAVE ----------
-    const bytes = await pdf.save()
-    const file = `Certificate_${stylistName.replace(/\s+/g, '_')}_${styleName.replace(/\s+/g, '_')}.pdf`
-
-    return new NextResponse(Buffer.from(bytes), {
+    return new NextResponse(Buffer.from(pdfBytes), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${file}"`
-      }
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+      },
     })
   } catch (e) {
-    console.error('Certificate PDF error:', e)
+    console.error('CERTIFICATE ROUTE ERROR:', e)
     return NextResponse.json(
       { ok: false, error: String(e?.message || e) },
       { status: 500 }
