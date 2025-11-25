@@ -57,7 +57,7 @@ function ApprovedResultInner() {
       }
 
       // 2) Ask the server to generate the PDF
-      const pdfRes = await fetch('/api/generate', {
+      const pdfRes = await fetch('/api/certificates/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

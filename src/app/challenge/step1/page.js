@@ -240,7 +240,6 @@ function ChallengeStep1Page() {
     height: '78%',
     borderRadius: '50%',
     boxShadow: '0 0 0 3px rgba(255, 255, 255, 0.9)',
-    outline: '1200px solid rgba(0, 0, 0, 0.22)',
   }
 
   const hasImage = !!(previewUrl || imageUrl)
