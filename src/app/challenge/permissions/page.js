@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Image from 'next/image'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabaseClient'
 
@@ -10,268 +9,211 @@ export default function PermissionsPage() {
 
   const [user, setUser] = useState(null)
   const [choice, setChoice] = useState(null) // 'yes' | 'no' | null
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [isMobile, setIsMobile] = useState(false)
+  const [error, setError] = useState(null)
 
-  // ---------- simple mobile detection for layout ----------
+  // Fetch session and ensure a profile row exists
   useEffect(() => {
-    const measure = () => {
-      if (typeof window === 'undefined') return
-      setIsMobile(window.innerWidth < 640)
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [])
+    const init = async () => {
+      setLoading(true)
+      setError(null)
 
-  // ---------- load session + existing consent ----------
-  useEffect(() => {
-    const load = async () => {
-      const { data, error } = await supabase.auth.getSession()
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession()
 
-      if (error) {
-        console.error('Error getting session:', error.message)
+      if (sessionError) {
+        console.error('Error getting session:', sessionError)
+        setError('There was a problem checking your session. Please try again.')
+        setLoading(false)
         return
       }
 
-      const sessionUser = data.session?.user
+      const sessionUser = sessionData?.session?.user
+
       if (!sessionUser) {
+        // No authenticated user – send back to home / login
         router.push('/')
         return
       }
 
+      console.log('Permissions: session user', sessionUser)
       setUser(sessionUser)
 
-      // Check if they’ve already answered
-      const { data: profile, error: profErr } = await supabase
+      // 1. Try to fetch existing profile
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabase
         .from('profiles')
-        .select('media_consent')
+        .select('id, email, media_consent')
         .eq('id', sessionUser.id)
         .maybeSingle()
 
-      if (profErr) {
-        console.warn('Error loading profile for consent:', profErr.message)
+      if (profileError && profileError.code !== 'PGRST116') {
+        // PGRST116 = "Results contain 0 rows" for maybeSingle; treat that as "no profile yet"
+        console.error('Error fetching profile:', profileError)
+        setError('There was a problem loading your profile. Please try again.')
+        setLoading(false)
+        return
       }
 
-      const consent = profile?.media_consent
-      if (consent === true) setChoice('yes')
-      if (consent === false) setChoice('no')
+      let effectiveProfile = profile
+
+      // 2. If no profile row yet, create one with id + email via upsert
+      if (!effectiveProfile) {
+        console.log('No profile found; creating one via upsert')
+        const {
+          data: insertedProfile,
+          error: insertError,
+        } = await supabase
+          .from('profiles')
+          .upsert(
+            {
+              id: sessionUser.id,
+              email: sessionUser.email || null,
+            },
+            { onConflict: 'id' },
+          )
+          .select('id, email, media_consent')
+          .single()
+
+        if (insertError) {
+          console.error('Error creating profile:', insertError)
+          setError('There was a problem creating your profile. Please try again.')
+          setLoading(false)
+          return
+        }
+
+        effectiveProfile = insertedProfile
+      }
+
+      console.log('Effective profile:', effectiveProfile)
+
+      // 3. Pre-select consent choice if already set
+      if (effectiveProfile?.media_consent === true) {
+        setChoice('yes')
+      } else if (effectiveProfile?.media_consent === false) {
+        setChoice('no')
+      } else {
+        setChoice(null)
+      }
+
+      setLoading(false)
     }
 
-    load()
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
-  // ---------- save choice ----------
-  const saveChoice = async () => {
-    if (!choice) {
-      setError('Please choose one option.')
+  const handleSave = async () => {
+    if (!user) {
+      setError('No user found. Please log in again.')
       return
     }
-    if (!user) {
-      setError('You need to be signed in to continue.')
+
+    if (!choice) {
+      setError('Please select one of the options to continue.')
       return
     }
 
     setSaving(true)
-    setError('')
+    setError(null)
 
-    const { error: upsertErr } = await supabase
+    const selectedConsent = choice === 'yes'
+
+    console.log('Saving media_consent:', {
+      userId: user.id,
+      email: user.email,
+      media_consent: selectedConsent,
+    })
+
+    const {
+      data: upserted,
+      error: upsertError,
+    } = await supabase
       .from('profiles')
-      .update({
-        media_consent: choice === 'yes',
-        media_consent_at: new Date().toISOString()
-      })
-      .eq('id', user.id)
+      .upsert(
+        {
+          id: user.id,
+          email: user.email || null,
+          media_consent: selectedConsent,
+          media_consent_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' },
+      )
+      .select('id')
+      .single()
 
-    if (upsertErr) {
-      console.error('Error saving media_consent:', upsertErr.message)
-      setError('Sorry, we could not save your choice. Please try again.')
+    if (upsertError) {
+      console.error('Error saving media_consent:', upsertError)
+      setError('There was a problem saving your choice. Please try again.')
       setSaving(false)
       return
     }
 
-    setSaving(false)
+    if (!upserted) {
+      console.error('Upsert returned no data')
+      setError('There was a problem saving your choice. Please try again.')
+      setSaving(false)
+      return
+    }
+
+    console.log('Consent saved, navigating to /challenge/step1')
     router.push('/challenge/step1')
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Loading…</p>
+      </div>
+    )
+  }
+
   return (
-    <main
-      style={{
-        maxWidth: 800,
-        margin: '0 auto',
-        padding: isMobile ? '1.5rem 1rem 2.5rem' : '2.25rem 1.5rem 3rem',
-        color: '#fff',
-        background: '#000',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        minHeight: '100vh'
-      }}
-    >
-      {/* Logo */}
-      <div style={{ textAlign: 'center', marginBottom: isMobile ? '1.25rem' : '1.75rem' }}>
-        <Image
-          src="/logo.jpeg"
-          alt="Style Challenge Logo"
-          width={isMobile ? 220 : 260}
-          height={0}
-          style={{ height: 'auto', maxWidth: '100%' }}
-          priority
-        />
-      </div>
+    <div className="min-h-screen flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md border rounded-lg p-6 shadow-sm bg-white">
+        <h1 className="text-xl font-semibold mb-4">Permissions</h1>
+        <p className="mb-4">
+          Do you give Patrick Cameron permission to use your uploaded images for education and
+          marketing? You can still complete the challenge if you say no.
+        </p>
 
-      {/* Patrick's portrait + intro */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: isMobile ? 'column' : 'row',
-          alignItems: isMobile ? 'center' : 'flex-start',
-          gap: isMobile ? '1rem' : '1.25rem',
-          marginBottom: isMobile ? '1.25rem' : '1.75rem',
-          textAlign: isMobile ? 'center' : 'left'
-        }}
-      >
-        <img
-          src="/press_shot.JPG"
-          alt="Patrick Cameron"
-          style={{
-            width: isMobile ? 140 : 120,
-            height: 'auto',
-            borderRadius: 12,
-            objectFit: 'cover',
-            flexShrink: 0
-          }}
-        />
-
-        <div style={{ maxWidth: 520 }}>
-          <h2
-            style={{
-              margin: 0,
-              fontWeight: 800,
-              fontSize: isMobile ? '1.35rem' : '1.6rem'
-            }}
-          >
-            Hi, Patrick here.
-          </h2>
-          <p
-            style={{
-              marginTop: '0.6rem',
-              lineHeight: 1.5,
-              color: '#ddd',
-              fontSize: isMobile ? '0.96rem' : '1rem'
-            }}
-          >
-            I’m really pleased you’re doing this Style Challenge.
-            <br />
-            <br />
-            One of my favourite things is sharing the work of stylists and
-            students from around the world — on Facebook, Instagram, TikTok,
-            my website and in classes. It inspires other hairdressers and it’s
-            a brilliant way to shine a light on <strong>your</strong> skills
-            and your salon.
-            <br />
-            <br />
-            Some people love their work being shown, others prefer to keep
-            their images private. Both choices are absolutely fine and will
-            not affect your challenge, your feedback or your certificate.
-            <br />
-            <br />
-            If you ever change your mind later, just email me and my team at{' '}
-            <strong>info@accesslonghair.com</strong>.
-          </p>
+        <div className="space-y-3 mb-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="consent"
+              value="yes"
+              checked={choice === 'yes'}
+              onChange={() => setChoice('yes')}
+            />
+            <span>Yes, I give permission.</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="consent"
+              value="no"
+              checked={choice === 'no'}
+              onChange={() => setChoice('no')}
+            />
+            <span>No, I don&apos;t give permission.</span>
+          </label>
         </div>
-      </div>
 
-      {/* Consent options */}
-      <div
-        style={{
-          marginTop: '0.5rem',
-          color: '#eee',
-          fontSize: isMobile ? '0.95rem' : '1rem'
-        }}
-      >
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '0.6rem',
-            marginBottom: '1rem',
-            cursor: 'pointer'
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={choice === 'yes'}
-            onChange={() => setChoice(choice === 'yes' ? null : 'yes')}
-            style={{ width: 20, height: 20, marginTop: 3 }}
-          />
-          <span>
-            <strong>Yes</strong> — I’m happy for Patrick and his team to use my
-            photos (and my name / salon name when appropriate) on things like
-            Facebook, Instagram, TikTok, the website or live classes to
-            showcase my work and inspire other stylists.
-          </span>
-        </label>
+        {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '0.6rem',
-            cursor: 'pointer'
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={choice === 'no'}
-            onChange={() => setChoice(choice === 'no' ? null : 'no')}
-            style={{ width: 20, height: 20, marginTop: 3 }}
-          />
-          <span>
-            <strong>No</strong> — please keep my photos private. They can be
-            used inside the Style Challenge and for my assessment and
-            certification only, but not posted or shared publicly.
-          </span>
-        </label>
-
-        {error && (
-          <p style={{ color: '#ffb3b3', marginTop: '0.75rem' }}>{error}</p>
-        )}
-      </div>
-
-      <p
-        style={{
-          marginTop: '1.75rem',
-          textAlign: 'center',
-          color: '#bbb',
-          fontSize: isMobile ? '0.9rem' : '0.95rem'
-        }}
-      >
-        Please choose one option above — you can still complete the challenge
-        whichever you prefer.
-      </p>
-
-      {/* Save button */}
-      <div style={{ textAlign: 'center', marginTop: '1.25rem' }}>
         <button
-          onClick={saveChoice}
+          type="button"
+          onClick={handleSave}
           disabled={saving}
-          style={{
-            background: '#28a745',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 10,
-            padding: '14px 22px',
-            fontSize: '1.05rem',
-            fontWeight: 700,
-            cursor: saving ? 'default' : 'pointer',
-            boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-            opacity: saving ? 0.7 : 1,
-            minWidth: 260
-          }}
+          className="w-full py-2 px-4 rounded-md border bg-black text-white disabled:opacity-60"
         >
-          {saving ? 'Saving…' : 'Save my choice and start the challenge'}
+          {saving ? 'Saving…' : 'Save and continue'}
         </button>
       </div>
-    </main>
+    </div>
   )
 }
