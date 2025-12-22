@@ -1,12 +1,12 @@
 // src/app/page.js
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function HomePage() {
+function HomeInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const demo = searchParams.get('demo') === '1'
@@ -373,5 +373,31 @@ export default function HomePage() {
         </p>
       )}
     </main>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: '100vh',
+            background: '#000',
+            color: '#ccc',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: 'sans-serif',
+            padding: '2rem 1rem',
+            textAlign: 'center',
+          }}
+        >
+          Loading…
+        </main>
+      }
+    >
+      <HomeInner />
+    </Suspense>
   )
 }
