@@ -8,32 +8,43 @@ export const dynamic = 'force-dynamic' // avoid any caching issues
 
 const safe = (v) => (v == null ? '' : String(v))
 
+function titleFromSlug(slug) {
+  if (!slug) return 'Style Challenge'
+  return slug
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
 
-    const stylistName   = safe(body.stylistName)   // required
-    const salonName     = safe(body.salonName)     // optional
-    const styleName     = safe(body.styleName)     // required
-    const date          = safe(body.date)          // required (e.g. 2025-11-09)
-    const certificateId = safe(body.certificateId) // required (e.g. PC-001234)
+    const stylistName   = safe(body.stylistName)
+    const salonName     = safe(body.salonName)
+    const styleName     = safe(body.styleName)
+    const challengeSlug = safe(body.challengeSlug)
+    const date          = safe(body.date)
+    const certificateId = safe(body.certificateId)
 
-    if (!stylistName || !styleName || !date || !certificateId) {
+    if (!stylistName || !date || !certificateId) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            'Missing required fields (stylistName, styleName, date, certificateId).',
+            'Missing required fields (stylistName, date, certificateId).',
         },
         { status: 400 }
       )
     }
 
+    const challengeTitle =
+      styleName || titleFromSlug(challengeSlug) || 'Style Challenge'
+
     // Helper to resolve assets under /public/cert
     const asset = (p) => path.join(process.cwd(), 'public', 'cert', p)
 
     // ---- 1. Create PDF sized to the certificate artwork ----
-    // We use the PNG as a full-page background and then overlay text.
     const certPngBytes = await readFile(asset('certificate.png'))
     const pdf = await PDFDocument.create()
     const certImage = await pdf.embedPng(certPngBytes)
@@ -41,7 +52,7 @@ export async function POST(req) {
     const page = pdf.addPage([certImage.width, certImage.height])
     const { width, height } = page.getSize()
 
-    // Background image fills the entire page
+    // Background
     page.drawImage(certImage, {
       x: 0,
       y: 0,
@@ -53,18 +64,18 @@ export async function POST(req) {
     const serif = await pdf.embedFont(StandardFonts.TimesRoman)
     const serifBold = await pdf.embedFont(StandardFonts.TimesRomanBold)
 
-    const textWidth = (text, size, font) => font.widthOfTextAtSize(text, size)
+    const textWidth = (text, size, font) =>
+      font.widthOfTextAtSize(text, size)
     const centerX = (text, size, font) =>
       (width - textWidth(text, size, font)) / 2
 
-    // ---- 2. Body text block (centre-bottom area) ----
+    // ---- 2. Body text ----
     const line1 = 'This certifies that'
     const nameLine = stylistName.toUpperCase()
     const line2 = salonName ? `of ${salonName}` : ''
-    const line3 = `has successfully completed the Style Challenge`
-    const line4 = styleName
+    const line3 = 'has successfully completed the'
+    const line4 = challengeTitle
 
-    // Start roughly in the lower third of the page – tweak if needed
     let y = height * 0.36
 
     page.drawText(line1, {
@@ -106,14 +117,14 @@ export async function POST(req) {
     y -= 30
 
     page.drawText(line4, {
-      x: centerX(line4, 20, serifBold),
+      x: centerX(line4, 22, serifBold),
       y,
-      size: 20,
+      size: 22,
       font: serifBold,
       color: black,
     })
 
-    // ---- 3. Footer details (date + certificate number) ----
+    // ---- 3. Footer ----
     const dateLine = `Awarded on ${date}`
     const certLine = `Certificate No. ${certificateId}`
 
@@ -133,12 +144,12 @@ export async function POST(req) {
       color: black,
     })
 
-    // ---- 4. Save and return PDF ----
+    // ---- 4. Return PDF ----
     const pdfBytes = await pdf.save()
 
     const stylistSlug = stylistName.replace(/\s+/g, '_')
-    const styleSlug = styleName.replace(/\s+/g, '_')
-    const fileName = `Certificate_${stylistSlug}_${styleSlug}.pdf`
+    const challengeSlugSafe = challengeTitle.replace(/\s+/g, '_')
+    const fileName = `Certificate_${stylistSlug}_${challengeSlugSafe}.pdf`
 
     return new NextResponse(Buffer.from(pdfBytes), {
       headers: {

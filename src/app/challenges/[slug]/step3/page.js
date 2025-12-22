@@ -30,11 +30,33 @@ function ChallengeStep3Page() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // ✅ Demo flag (offline)
+  const demo = searchParams.get('demo') === '1'
+
   const challengeId = challenge?.id || null
 
   // -------- Load challenge metadata by slug --------
   useEffect(() => {
     if (!slug) return
+
+    // ✅ DEMO: do not call Supabase; use local assets under /public/demo/...
+    if (demo) {
+      setChallenge({
+        id: 'demo-challenge-style-one',
+        slug,
+        title: 'Challenge Number One',
+        steps: [
+          {
+            stepNumber: 3,
+            // Keeping this in case you still want it in the JSON, but we won't render video in demo.
+            videoUrl: '/demo/video/step_3.mp4',
+            referenceImageUrl: '/demo/images/step3_reference.jpeg',
+          },
+        ],
+      })
+      setLoadingChallenge(false)
+      return
+    }
 
     const loadChallenge = async () => {
       const { data, error } = await supabase
@@ -54,7 +76,7 @@ function ChallengeStep3Page() {
     }
 
     loadChallenge()
-  }, [slug])
+  }, [slug, demo])
 
   // -------- Session + admin flag + consent gate --------
   useEffect(() => {
@@ -62,6 +84,13 @@ function ChallengeStep3Page() {
     setAdminDemo(isAdminDemo)
 
     const loadSessionAndConsent = async () => {
+      // ✅ DEMO bypasses auth/consent gating
+      if (demo) {
+        setUser(null)
+        setLoadingUser(false)
+        return
+      }
+
       const { data, error } = await supabase.auth.getSession()
 
       if (error) {
@@ -78,8 +107,7 @@ function ChallengeStep3Page() {
         return
       }
 
-      // If we have a real user and are NOT in admin demo,
-      // check whether they’ve answered the permission question.
+      // Consent gate (real user only)
       if (sessionUser && !isAdminDemo) {
         const { data: profile, error: profErr } = await supabase
           .from('profiles')
@@ -88,10 +116,7 @@ function ChallengeStep3Page() {
           .maybeSingle()
 
         if (profErr) {
-          console.warn(
-            'Error loading profile for consent check:',
-            profErr.message
-          )
+          console.warn('Error loading profile for consent check:', profErr.message)
         }
 
         const consent = profile?.media_consent
@@ -108,11 +133,11 @@ function ChallengeStep3Page() {
     }
 
     loadSessionAndConsent()
-  }, [router, searchParams])
+  }, [router, searchParams, demo])
 
   // -------- Load last Step 3 image for this challenge --------
   useEffect(() => {
-    if (!user || adminDemo || !challengeId) return
+    if (!user || adminDemo || demo || !challengeId) return
 
     let cancelled = false
 
@@ -145,7 +170,7 @@ function ChallengeStep3Page() {
     return () => {
       cancelled = true
     }
-  }, [user, adminDemo, challengeId])
+  }, [user, adminDemo, demo, challengeId])
 
   const handleFileChange = (fileObj) => {
     setFile(fileObj || null)
@@ -178,15 +203,26 @@ function ChallengeStep3Page() {
   const referenceImageUrl =
     stepConfig?.referenceImageUrl || '/style_one/step3_reference.jpeg'
 
+  // ✅ DEMO "Your Version" image
+  const demoYourImageUrl = '/demo/images/stylist_step3_reference.jpeg'
+
+  // ✅ DEMO video placeholder image
+  const demoVideoPlaceholderUrl = '/demo/images/video_placeholder_step3.jpeg'
+
   // -------- Upload handler --------
   const handleUpload = async (e) => {
     e.preventDefault()
     if (uploading) return
 
+    // ✅ DEMO: no uploads; just proceed
+    if (demo) {
+      setUploadMessage('✅ Demo mode: using the demo stylist image.')
+      setShowOptions(true)
+      return
+    }
+
     if (!challengeId && !adminDemo) {
-      setUploadMessage(
-        'There was a problem loading this challenge. Please try again.'
-      )
+      setUploadMessage('There was a problem loading this challenge. Please try again.')
       return
     }
 
@@ -212,9 +248,7 @@ function ChallengeStep3Page() {
 
     // New file but no valid session (outside demo) → block
     if (!user && !adminDemo) {
-      setUploadMessage(
-        'There was a problem with your session. Please sign in again.'
-      )
+      setUploadMessage('There was a problem with your session. Please sign in again.')
       return
     }
 
@@ -225,9 +259,7 @@ function ChallengeStep3Page() {
       const userId = user?.id || 'demo-user'
       const filePath = makeUploadPath(userId, 'step3', file)
 
-      const { data, error } = await supabase.storage
-        .from('uploads')
-        .upload(filePath, file)
+      const { data, error } = await supabase.storage.from('uploads').upload(filePath, file)
 
       if (error) {
         console.error('❌ Storage upload failed (step3):', error.message)
@@ -255,8 +287,7 @@ function ChallengeStep3Page() {
       }
 
       const fullUrl =
-        'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/' +
-        path
+        'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/' + path
       setImageUrl(fullUrl)
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -278,12 +309,13 @@ function ChallengeStep3Page() {
     if (navigating) return
     setNavigating(true)
 
-    router.push(
-      '/challenges/' +
-        slug +
-        '/finished' +
-        (adminDemo ? '?admin_demo=true' : '')
-    )
+    // ✅ Preserve existing admin_demo; add demo query when present
+    const qs = []
+    if (adminDemo) qs.push('admin_demo=true')
+    if (demo) qs.push('demo=1')
+    const suffix = qs.length ? `?${qs.join('&')}` : ''
+
+    router.push('/challenges/' + slug + '/finished' + suffix)
   }
 
   // Combined loading state
@@ -338,7 +370,6 @@ function ChallengeStep3Page() {
     justifyContent: 'center',
   }
 
-  // Clean oval border only – no dimming outline
   const oval = {
     width: '88%',
     height: '78%',
@@ -346,7 +377,46 @@ function ChallengeStep3Page() {
     border: '3px solid rgba(255, 255, 255, 0.9)',
   }
 
-  const hasImage = !!(previewUrl || imageUrl)
+  // --- Demo placeholder container formatting (same pattern as Step 2 / landing) ---
+  const placeholderFrame = {
+    background: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    border: '1px solid #e6e6e6',
+    boxShadow: '0 10px 28px rgba(0,0,0,0.18)',
+  }
+
+  const placeholderInner = {
+    borderRadius: 10,
+    overflow: 'hidden',
+    border: '1px solid #dcdcdc',
+    background: '#f7f7f7',
+  }
+
+  const placeholderCaption = {
+    marginTop: 10,
+    fontSize: '0.9rem',
+    color: '#555',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  }
+
+  const captionPill = {
+    display: 'inline-block',
+    padding: '0.25rem 0.6rem',
+    borderRadius: 999,
+    background: '#f1f1f1',
+    border: '1px solid #e1e1e1',
+    fontSize: '0.8rem',
+    color: '#444',
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
+  }
+
+  const hasImage = !!(previewUrl || imageUrl || demo)
+  const yourImageSrc = demo ? demoYourImageUrl : previewUrl || imageUrl
 
   return (
     <main
@@ -399,52 +469,67 @@ function ChallengeStep3Page() {
         }}
       >
         <li>Watch Patrick’s demo for Step 3.</li>
-        <li>
-          Smooth, polish, and perfect the finish so it looks clean from every
-          angle.
-        </li>
-        <li>
-          Take your photo in the same framing as Steps 1 and 2 for a consistent
-          portfolio.
-        </li>
+        <li>Smooth, polish, and perfect the finish so it looks clean from every angle.</li>
+        <li>Take your photo in the same framing as Steps 1 and 2 for a consistent portfolio.</li>
       </ol>
 
-      {/* Video */}
-      <div
-        style={{
-          marginBottom: '2rem',
-          width: '100%',
-          position: 'relative',
-          paddingTop: '56.25%', // 16:9
-        }}
-      >
-        <iframe
-          src={stepVideoUrl}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            border: '2px solid #555',
-            borderRadius: 6,
-          }}
-          frameBorder="0"
-          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
-          referrerPolicy="strict-origin-when-cross-origin"
-          allowFullScreen
-          title={challenge.title + ' – Step 3'}
-        />
+      {/* Video / Demo placeholder */}
+      <div style={{ marginBottom: '2rem' }}>
+        {demo ? (
+          <div style={placeholderFrame}>
+            <div style={placeholderInner}>
+              <Image
+                src={demoVideoPlaceholderUrl}
+                alt="Demo video placeholder - Step 3"
+                width={1200}
+                height={675}
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  display: 'block',
+                }}
+                priority
+              />
+            </div>
+
+            <div style={placeholderCaption}>
+              <span style={captionPill}>Video placeholder</span>
+              <span style={{ fontSize: '0.85rem', color: '#666' }}>
+                Live video loads when Wi-Fi is available
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '100%',
+              position: 'relative',
+              paddingTop: '56.25%',
+            }}
+          >
+            <iframe
+              src={stepVideoUrl}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                border: '2px solid #555',
+                borderRadius: 6,
+              }}
+              frameBorder="0"
+              allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+              title={challenge.title + ' – Step 3'}
+            />
+          </div>
+        )}
       </div>
 
       {/* Compare */}
-      <h3
-        style={{
-          fontSize: '1.3rem',
-          marginBottom: '1rem',
-          marginTop: '2rem',
-        }}
-      >
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
         Compare Your Work
       </h3>
 
@@ -463,11 +548,7 @@ function ChallengeStep3Page() {
             <strong>Patrick’s Version</strong>
           </p>
           <div style={overlayFrame}>
-            <img
-              src={referenceImageUrl}
-              alt="Patrick Step 3"
-              style={previewImageStyle}
-            />
+            <img src={referenceImageUrl} alt="Patrick Step 3" style={previewImageStyle} />
           </div>
         </div>
 
@@ -477,11 +558,7 @@ function ChallengeStep3Page() {
           </p>
           <div style={overlayFrame}>
             {hasImage ? (
-              <img
-                src={previewUrl || imageUrl}
-                alt="Your Version"
-                style={previewImageStyle}
-              />
+              <img src={yourImageSrc} alt="Your Version" style={previewImageStyle} />
             ) : (
               <div
                 style={{
@@ -519,7 +596,7 @@ function ChallengeStep3Page() {
       </div>
 
       {/* Upload Section */}
-      {!showOptions && !adminDemo && (
+      {!showOptions && !adminDemo && !demo && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
           <label
             style={{
@@ -555,8 +632,8 @@ function ChallengeStep3Page() {
               marginBottom: '1rem',
             }}
           >
-            Make sure the hairstyle fills the frame in <strong>portrait</strong>{' '}
-            mode, with the head and hair inside the oval.
+            Make sure the hairstyle fills the frame in <strong>portrait</strong> mode, with the head and hair
+            inside the oval.
           </p>
 
           <button
@@ -576,16 +653,14 @@ function ChallengeStep3Page() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading
-              ? 'Uploading…'
-              : '✅ Confirm, Add to Portfolio & View Finished Look'}
+            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & View Finished Look'}
           </button>
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </form>
       )}
 
-      {(showOptions || adminDemo) && (
+      {(showOptions || adminDemo || demo) && (
         <div
           style={{
             marginTop: '3rem',
@@ -596,26 +671,11 @@ function ChallengeStep3Page() {
             textAlign: 'center',
           }}
         >
-          <h2
-            style={{
-              color: '#28a745',
-              fontSize: '1.5rem',
-              marginBottom: '0.75rem',
-              fontWeight: 700,
-            }}
-          >
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: 700 }}>
             🎉 Fantastic work!
           </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              color: '#fff',
-              lineHeight: 1.5,
-              marginBottom: '1rem',
-            }}
-          >
-            You’ve completed all three steps. Next, confirm your finished look
-            and build your portfolio.
+          <p style={{ fontSize: '1.1rem', color: '#fff', lineHeight: 1.5, marginBottom: '1rem' }}>
+            You’ve completed all three steps. Next, confirm your finished look and build your portfolio.
           </p>
 
           <button
@@ -635,12 +695,10 @@ function ChallengeStep3Page() {
               opacity: navigating ? 0.9 : 1,
             }}
           >
-            {navigating
-              ? 'Loading finished look…'
-              : '✅ Go to Finished Look'}
+            {navigating ? 'Loading finished look…' : '✅ Go to Finished Look'}
           </button>
 
-          {!adminDemo && (
+          {!adminDemo && !demo && (
             <button
               onClick={resetUpload}
               disabled={navigating}
@@ -661,13 +719,7 @@ function ChallengeStep3Page() {
           )}
 
           {navigating && (
-            <p
-              style={{
-                marginTop: '0.75rem',
-                fontSize: '0.95rem',
-                color: '#cce8d5',
-              }}
-            >
+            <p style={{ marginTop: '0.75rem', fontSize: '0.95rem', color: '#cce8d5' }}>
               Moving to your Finished Look… please wait.
             </p>
           )}

@@ -9,24 +9,53 @@ function ApprovedResultInner() {
 
   const token = searchParams.get('token') || ''
   const userEmail = searchParams.get('userEmail') || ''
+  const demo = searchParams.get('demo') === '1' // ✅ demo/offline
 
   const [busy, setBusy] = useState(false)
 
   async function handleCertificateClick() {
+    // ✅ DEMO: download static demo certificate from /public/demo/Certificate_DEMO.pdf
+    if (demo) {
+      setBusy(true)
+      try {
+        const res = await fetch('/demo/Certificate_DEMO.pdf', { method: 'GET' })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          console.error('Demo certificate fetch failed:', res.status, text)
+          alert('Could not load the demo certificate PDF.')
+          return
+        }
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'Certificate_DEMO.pdf'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        URL.revokeObjectURL(url)
+      } catch (err) {
+        console.error('Demo certificate error:', err)
+        alert('Could not download the demo certificate PDF.')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
+    // ✅ Existing behaviour unchanged (real certificate generation)
     if (!token) {
       alert('Sorry, we could not find your approval token.')
       return
     }
     if (!userEmail) {
-      alert(
-        'Sorry, we are missing your email address for this certificate link.'
-      )
+      alert('Sorry, we are missing your email address for this certificate link.')
       return
     }
 
     setBusy(true)
     try {
-      // 1) Fetch certificate metadata from our API
       const metaRes = await fetch('/api/review-certification', {
         method: 'POST',
         headers: {
@@ -56,8 +85,7 @@ function ApprovedResultInner() {
         return
       }
 
-      // 2) Ask the server to generate the PDF
-      const pdfRes = await fetch('/api/certificates/generate', {
+      const pdfRes = await fetch('/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -116,8 +144,7 @@ function ApprovedResultInner() {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    fontFamily:
-      'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+    fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
   }
 
   const headerLogoWrap = {
@@ -131,6 +158,7 @@ function ApprovedResultInner() {
     height: 'auto',
   }
 
+  // Non-demo Vimeo frame (fixed 16:9)
   const videoFrame = {
     width: 'min(900px, 96vw)',
     margin: '0 auto 18px auto',
@@ -140,6 +168,50 @@ function ApprovedResultInner() {
     aspectRatio: '16 / 9',
     position: 'relative',
     border: '1px solid #2b2b2b',
+  }
+
+  // ✅ Demo wrapper (NO fixed aspect ratio, NO overflow clipping)
+  const demoVideoWrap = {
+    width: 'min(900px, 96vw)',
+    margin: '0 auto 18px auto',
+  }
+
+  // ✅ Demo placeholder container formatting
+  const placeholderFrame = {
+    background: '#fff',
+    borderRadius: 16,
+    padding: 12,
+    border: '1px solid #e6e6e6',
+    boxShadow: '0 10px 28px rgba(0,0,0,0.18)',
+  }
+
+  const placeholderInner = {
+    borderRadius: 14,
+    overflow: 'hidden',
+    border: '1px solid #dcdcdc',
+    background: '#f7f7f7',
+  }
+
+  const placeholderCaption = {
+    marginTop: 10,
+    fontSize: '0.9rem',
+    color: '#555',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  }
+
+  const captionPill = {
+    display: 'inline-block',
+    padding: '0.25rem 0.6rem',
+    borderRadius: 999,
+    background: '#f1f1f1',
+    border: '1px solid #e1e1e1',
+    fontSize: '0.8rem',
+    color: '#444',
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
   }
 
   const card = {
@@ -203,6 +275,10 @@ function ApprovedResultInner() {
     wordBreak: 'break-all',
   }
 
+  // ✅ From your screenshot: public/demo/images/video_placeholder_congratulations.jpeg
+  const demoCongratsPlaceholderUrl =
+    '/demo/images/video_placeholder_congratulations.jpeg'
+
   return (
     <main style={pageShell}>
       {/* Logo header */}
@@ -214,25 +290,46 @@ function ApprovedResultInner() {
         />
       </div>
 
-      {/* Vimeo: Patrick's congratulations */}
-      <div style={videoFrame}>
-        <iframe
-          src="https://player.vimeo.com/video/1138761655?badge=0&autopause=0&player_id=0&app_id=58479"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            border: 'none',
-          }}
-          frameBorder="0"
-          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
-          referrerPolicy="strict-origin-when-cross-origin"
-          allowFullScreen
-          title="Congratulations from Patrick"
-        />
-      </div>
+      {/* Video (real) OR demo placeholder (offline) */}
+      {demo ? (
+        <div style={demoVideoWrap}>
+          <div style={placeholderFrame}>
+            <div style={placeholderInner}>
+              <img
+                src={demoCongratsPlaceholderUrl}
+                alt="Demo video placeholder - Congratulations"
+                style={{ width: '100%', height: 'auto', display: 'block' }}
+              />
+            </div>
+
+            <div style={placeholderCaption}>
+              <span style={captionPill}>Video placeholder</span>
+              <span style={{ fontSize: '0.85rem', color: '#666' }}>
+                Live video loads when Wi-Fi is available
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={videoFrame}>
+          <iframe
+            src="https://player.vimeo.com/video/1138761655?badge=0&autopause=0&player_id=0&app_id=58479"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              border: 'none',
+            }}
+            frameBorder="0"
+            allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+            title="Congratulations from Patrick"
+          />
+        </div>
+      )}
 
       {/* Certificate card */}
       <div style={card}>
@@ -250,9 +347,8 @@ function ApprovedResultInner() {
               Your certificate is ready to download.
             </div>
             <div>
-              Click the button below and we&apos;ll prepare a printable PDF
-              certificate with your name and challenge details. You can save it,
-              print it, or share it online.
+              Click the button below and we&apos;ll prepare a printable PDF certificate
+              with your name and challenge details. You can save it, print it, or share it online.
             </div>
           </div>
         </div>
@@ -268,6 +364,8 @@ function ApprovedResultInner() {
 
         {/* token + email for debugging / support */}
         <div style={tiny}>
+          demo: {demo ? 'true' : 'false'}
+          <br />
           token: {token || '(missing)'}
           {userEmail && (
             <>

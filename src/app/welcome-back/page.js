@@ -3,13 +3,14 @@
 import { useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient'; // path is correct for /app/welcome-back
+import { supabase } from '../../lib/supabaseClient';
 
 function WelcomeBackInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // resend-link form state
@@ -17,38 +18,75 @@ function WelcomeBackInner() {
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
 
-  const nextPath = sp.get('next') || '/challenge'; // default target if none provided
+  const explicitNext = sp.get('next');  // user-supplied next destination
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
+
+    const loadSession = async () => {
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
+
       const sessionUser = data?.session?.user ?? null;
       setUser(sessionUser);
+
+      if (!sessionUser) {
+        setLoading(false);
+        return;
+      }
+
+      // Load profile so we can check is_pro
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, is_pro')
+        .eq('id', sessionUser.id)
+        .maybeSingle();
+
+      if (!profileError && profileData) {
+        setProfile(profileData);
+      }
+
       setLoading(false);
     };
-    run();
-    return () => { cancelled = true; };
+
+    loadSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // Compute final destination
+  const computeNextPath = () => {
+    if (explicitNext) return explicitNext;
+
+    // If no next param:
+    if (profile?.is_pro) return '/challenges';
+    return '/challenge';
+  };
+
   const handleContinue = () => {
+    const nextPath = computeNextPath();
     router.replace(nextPath);
   };
 
   const handleSendLink = async (e) => {
     e.preventDefault();
     setMessage('');
+
     if (!email.trim()) {
       setMessage('Please enter your email.');
       return;
     }
+
     setSending(true);
+
     try {
-      // remember intended destination as a fallback in case the email client strips the URL params
+      const nextPath = computeNextPath();
+
+      // fallback destination in case email client strips params
       try { localStorage.setItem('pc_next', nextPath); } catch {}
 
-      // Build an absolute callback URL to our /auth/callback page
       const callback = new URL('/auth/callback', window.location.origin).toString();
 
       const { error } = await supabase.auth.signInWithOtp({
@@ -76,7 +114,7 @@ function WelcomeBackInner() {
     );
   }
 
-  // If already signed in, just let them continue to the intended step
+  // If user is signed in
   if (user) {
     return (
       <main style={shell}>
@@ -96,17 +134,14 @@ function WelcomeBackInner() {
           You’re signed in as <strong>{user.email}</strong>. Continue to your challenge.
         </p>
 
-        <button
-          onClick={handleContinue}
-          style={primaryBtn}
-        >
+        <button onClick={handleContinue} style={primaryBtn}>
           Continue
         </button>
       </main>
     );
   }
 
-  // No session: offer a quick way to resend the magic link
+  // No session → sign-in form
   return (
     <main style={shell}>
       <div style={{ marginBottom: 16 }}>
@@ -123,7 +158,7 @@ function WelcomeBackInner() {
       <h1 style={{ margin: '6px 0 8px' }}>Sign back in</h1>
       <p style={{ color: '#ccc', marginBottom: 16, maxWidth: 520 }}>
         Your previous sign-in link may have expired. Enter your email and we’ll send a fresh link.
-        You’ll be redirected to: <code style={{ color: '#9fd3ff' }}>{nextPath}</code>
+        You’ll be redirected to: <code style={{ color: '#9fd3ff' }}>{computeNextPath()}</code>
       </p>
 
       <form onSubmit={handleSendLink} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>

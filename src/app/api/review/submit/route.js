@@ -30,6 +30,14 @@ function safe(v) {
   return v == null ? '' : String(v)
 }
 
+function normalizeSlug(v) {
+  const s = String(v || '').trim()
+  // keep it conservative; do not allow pathy weirdness
+  if (!s) return 'starter-style'
+  const cleaned = s.toLowerCase().replace(/[^a-z0-9-]/g, '')
+  return cleaned || 'starter-style'
+}
+
 export async function POST(req) {
   try {
     if (!supabaseAdmin) {
@@ -46,9 +54,12 @@ export async function POST(req) {
       firstName: bodyFirst,
       secondName: bodySecond,
       salonName: bodySalon,
+      slug: bodySlug,
       // optional images passed from client – we’ll merge with DB-derived ones
-      images: bodyImages = {}
+      images: bodyImages = {},
     } = body || {}
+
+    const challengeSlug = normalizeSlug(bodySlug)
 
     if (!userId) {
       return NextResponse.json(
@@ -86,7 +97,7 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
-    // NEW: pull latest step 1–4 uploads from DB if client didn't send URLs
+    // Pull latest step 1–4 uploads from DB if client didn't send URLs
     // ------------------------------------------------------------------
     let mergedImages = { ...bodyImages } // preserve any explicit overrides
 
@@ -125,7 +136,7 @@ export async function POST(req) {
     // ------------------------------------------------------------------
     const reviewToken = crypto.randomUUID()
 
-    const { error: subErr } = await supabaseAdmin.from('submissions').insert({
+    const submissionBase = {
       user_id: userId,
       email: userEmail,
       first_name: firstName || null,
@@ -135,8 +146,31 @@ export async function POST(req) {
       step1_url: mergedImages[1] || null,
       step2_url: mergedImages[2] || null,
       step3_url: mergedImages[3] || null,
-      finished_url: mergedImages[4] || null
-    })
+      finished_url: mergedImages[4] || null,
+    }
+
+    // Try to store slug if DB supports it; fallback safely if not.
+    let subErr = null
+    {
+      const { error } = await supabaseAdmin.from('submissions').insert({
+        ...submissionBase,
+        challenge_slug: challengeSlug,
+      })
+      if (!error) {
+        subErr = null
+      } else {
+        const msg = String(error?.message || '')
+        // If column doesn't exist, retry without it (v6 compatibility)
+        if (/challenge_slug/i.test(msg) && /does not exist|unknown/i.test(msg)) {
+          const { error: retryErr } = await supabaseAdmin
+            .from('submissions')
+            .insert(submissionBase)
+          subErr = retryErr || null
+        } else {
+          subErr = error
+        }
+      }
+    }
 
     if (subErr) {
       console.error('/api/review/submit: insert submissions error', subErr)
@@ -156,19 +190,24 @@ export async function POST(req) {
 
         const approveUrl = `${site}/api/review/decision?action=approve&token=${encodeURIComponent(
           reviewToken
-        )}&userEmail=${encodeURIComponent(userEmail)}`
-        const rejectUrl = `${site}/review/${encodeURIComponent(reviewToken)}`
+        )}&userEmail=${encodeURIComponent(userEmail)}&slug=${encodeURIComponent(
+          challengeSlug
+        )}`
+
+        // Keep existing reject path, but add slug for Pro routing downstream.
+        const rejectUrl = `${site}/review/${encodeURIComponent(
+          reviewToken
+        )}?slug=${encodeURIComponent(challengeSlug)}`
+
         const logoUrl = `${site}/logo.jpeg`
 
         // Build thumbnail cells from mergedImages
         const thumbCells = [1, 2, 3, 4]
           .map((step) => {
             const raw = mergedImages?.[step]
-            const label =
-              step === 4 ? 'Finished Look' : `Step ${step}`
+            const label = step === 4 ? 'Finished Look' : `Step ${step}`
 
             if (!raw) {
-              // placeholder tile if no image
               return `
                 <td align="center" style="padding:4px 6px;font-size:12px;color:#777;">
                   <div style="margin-bottom:4px;font-weight:600;">${label}</div>
@@ -191,7 +230,6 @@ export async function POST(req) {
             }
 
             let src = String(raw)
-            // If it's just a storage path, prefix with Supabase public URL
             if (!/^https?:\/\//i.test(src) && SUPABASE_URL) {
               const baseSupabase = SUPABASE_URL.replace(/\/+$/, '')
               src = `${baseSupabase}/storage/v1/object/public/uploads/${src}`
@@ -241,6 +279,9 @@ export async function POST(req) {
                         <p style="margin:0 0 4px;font-size:15px;line-height:1.6">
                           Stylist: <strong>${safe(stylist)}</strong>
                         </p>
+                        <p style="margin:0 0 4px;font-size:14px;line-height:1.6">
+                          Challenge: ${safe(challengeSlug)}
+                        </p>
                         ${
                           salonName
                             ? `<p style="margin:0 0 4px;font-size:14px;line-height:1.6">
@@ -256,7 +297,6 @@ export async function POST(req) {
                       </td>
                     </tr>
 
-                    <!-- thumbnails row -->
                     <tr>
                       <td style="padding:4px 22px 4px;">
                         <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
@@ -303,8 +343,8 @@ export async function POST(req) {
           replyTo: userEmail,
           subject: `Style Challenge submission — ${safe(
             [firstName, secondName].filter(Boolean).join(' ') || userEmail
-          )}`,
-          html
+          )} — ${safe(challengeSlug)}`,
+          html,
         })
 
         mailer = 'sent'
@@ -315,7 +355,7 @@ export async function POST(req) {
     }
 
     return NextResponse.json(
-      { ok: true, token: reviewToken, mailer },
+      { ok: true, token: reviewToken, mailer, slug: challengeSlug },
       { status: 200 }
     )
   } catch (err) {
