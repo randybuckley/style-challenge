@@ -52,3 +52,9 @@ node_modules/
 # Demo videos should never be committed
 public/demo/video/
 *.mp4
+
+# Never commit accidental CLI artefacts
+--data
+--output
+-H
+-d
