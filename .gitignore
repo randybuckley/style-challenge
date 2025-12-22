@@ -48,3 +48,7 @@ node_modules
 .next/
 node_modules/
 .DS_Store
+
+# Demo videos should never be committed
+public/demo/video/
+*.mp4
