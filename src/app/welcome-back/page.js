@@ -18,7 +18,7 @@ function WelcomeBackInner() {
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
 
-  const explicitNext = sp.get('next');  // user-supplied next destination
+  const explicitNext = sp.get('next'); // user-supplied next destination
 
   useEffect(() => {
     let cancelled = false;
@@ -85,13 +85,17 @@ function WelcomeBackInner() {
       const nextPath = computeNextPath();
 
       // fallback destination in case email client strips params
-      try { localStorage.setItem('pc_next', nextPath); } catch {}
+      try {
+        localStorage.setItem('pc_next', nextPath);
+      } catch {}
 
-      const callback = new URL('/auth/callback', window.location.origin).toString();
+      // ✅ FIX: include next in the callback URL so auth/callback can route to Pro correctly
+      const callback = new URL('/auth/callback', window.location.origin);
+      callback.searchParams.set('next', nextPath);
 
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: callback }
+        options: { emailRedirectTo: callback.toString() }
       });
 
       if (error) {
@@ -158,10 +162,17 @@ function WelcomeBackInner() {
       <h1 style={{ margin: '6px 0 8px' }}>Sign back in</h1>
       <p style={{ color: '#ccc', marginBottom: 16, maxWidth: 520 }}>
         Your previous sign-in link may have expired. Enter your email and we’ll send a fresh link.
-        You’ll be redirected to: <code style={{ color: '#9fd3ff' }}>{computeNextPath()}</code>
       </p>
 
-      <form onSubmit={handleSendLink} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <form
+        onSubmit={handleSendLink}
+        style={{
+          display: 'flex',
+          gap: 10,
+          flexWrap: 'wrap',
+          justifyContent: 'center'
+        }}
+      >
         <input
           type="email"
           inputMode="email"
