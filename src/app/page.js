@@ -66,10 +66,23 @@ function HomeInner() {
       // Clear any stale session before sending a fresh link
       await supabase.auth.signOut().catch(() => {})
 
+      // Minimal transition-safe routing for root (historically MVP):
+      // Explicitly send flow=mvp with a next destination that matches existing behaviour.
+      const nextPath = '/challenge'
+
+      // belt-and-braces fallback (in case email client strips query params)
+      try {
+        localStorage.setItem('pc_next', nextPath)
+      } catch {}
+
+      const callbackUrl = new URL('/auth/callback', window.location.origin)
+      callbackUrl.searchParams.set('flow', 'mvp')
+      callbackUrl.searchParams.set('next', nextPath)
+
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: callbackUrl.toString(),
         },
       })
 

@@ -32,6 +32,8 @@ function AuthCallbackInner() {
       }
 
       // 2) Determine destination
+      const flow = (sp.get('flow') || '').toLowerCase();
+
       const queryNextRaw = sp.get('next') || '';
 
       // Only allow internal, relative paths
@@ -57,11 +59,13 @@ function AuthCallbackInner() {
         return;
       }
 
-      // Otherwise: decide based on entitlement (source of truth).
-      // Pro users -> /challenges/menu
-      // Non-pro users -> MVP v6 default (/challenge/step1)
-      let fallbackNext = '/challenge/step1';
+      // Minimal safety during dual-flow transition:
+      // If the caller explicitly says flow=pro, default to Pro menu.
+      // Otherwise preserve existing behaviour (MVP default + entitlement-based upgrade).
+      let fallbackNext = flow === 'pro' ? '/challenges/menu' : '/challenge/step1';
 
+      // Preserve your existing entitlement-based fallback upgrade.
+      // (This keeps current behaviour for "no flow" cases, and still routes Pro users correctly.)
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionUser = sessionData?.session?.user || null;
@@ -80,7 +84,7 @@ function AuthCallbackInner() {
         }
       } catch (err) {
         console.warn('[callback] entitlement fallback failed:', err);
-        // Fail open to MVP v6 (existing behaviour)
+        // Fail open to existing fallbackNext (flow-aware default above)
       }
 
       if (!isMounted) return;
