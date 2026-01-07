@@ -1,3 +1,4 @@
+// src/app/challenges/menu/page.js
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -5,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabaseClient';
+import SignedInAs from '../../../components/SignedInAs';
 
 export default function ChallengesMenuPage() {
   const router = useRouter();
@@ -14,6 +16,9 @@ export default function ChallengesMenuPage() {
   const [error, setError] = useState(null);
 
   const [challenges, setChallenges] = useState([]);
+
+  // ✅ entitlement source-of-truth
+  const [isPro, setIsPro] = useState(false);
 
   // status keyed by slug: 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
@@ -26,7 +31,7 @@ export default function ChallengesMenuPage() {
       setLoading(true);
       setError(null);
 
-      // 1. Session
+      // 1) Session
       const { data: sessionData, error: sessionErr } =
         await supabase.auth.getSession();
 
@@ -50,7 +55,28 @@ export default function ChallengesMenuPage() {
       if (cancelled) return;
       setUser(sessionUser);
 
-      // 2. Load challenges (for now, just the one 'starter-style')
+      // 2) Entitlement gate (single source of truth: user_entitlements)
+      try {
+        const { data: entRows, error: entErr } = await supabase
+          .from('user_entitlements')
+          .select('tier')
+          .eq('user_id', sessionUser.id)
+          .eq('tier', 'pro')
+          .limit(1);
+
+        if (entErr) {
+          console.warn('Entitlement check error:', entErr.message);
+          // Fail closed: treat as non-pro if we cannot confirm entitlement
+          setIsPro(false);
+        } else {
+          setIsPro(!!(entRows && entRows.length > 0));
+        }
+      } catch (e) {
+        console.warn('Entitlement check failed:', e);
+        setIsPro(false);
+      }
+
+      // 3) Load challenges (DB list; we still keep your UI “collections” below)
       const { data: challengeData, error: challengeErr } = await supabase
         .from('challenges')
         .select('id, slug, title, tier, is_pro_only, thumbnail_url, is_active')
@@ -78,7 +104,7 @@ export default function ChallengesMenuPage() {
       if (cancelled) return;
       setChallenges(cleaned);
 
-      // 3. Portfolio status from uploads table
+      // 4) Portfolio status from uploads table
       const { data: uploadRows, error: uploadErr } = await supabase
         .from('uploads')
         .select('challenge_id, step_number')
@@ -87,7 +113,6 @@ export default function ChallengesMenuPage() {
       const portfolioBySlug = {};
 
       if (!uploadErr && uploadRows && uploadRows.length > 0) {
-        // Build challenge_id -> set of step_numbers
         const byChallengeId = new Map();
 
         for (const row of uploadRows) {
@@ -98,21 +123,21 @@ export default function ChallengesMenuPage() {
           byChallengeId.get(row.challenge_id).add(row.step_number);
         }
 
-        // For each challenge we know about, check if steps 1–4 exist
         for (const ch of cleaned) {
           const stepSet = byChallengeId.get(ch.id);
-          if (stepSet &&
-              stepSet.has(1) &&
-              stepSet.has(2) &&
-              stepSet.has(3) &&
-              stepSet.has(4)) {
+          if (
+            stepSet &&
+            stepSet.has(1) &&
+            stepSet.has(2) &&
+            stepSet.has(3) &&
+            stepSet.has(4)
+          ) {
             portfolioBySlug[ch.slug] = 'complete';
           } else {
             portfolioBySlug[ch.slug] = 'in-progress';
           }
         }
       } else {
-        // If uploads query fails, default everything to in-progress
         for (const ch of cleaned) {
           portfolioBySlug[ch.slug] = 'in-progress';
         }
@@ -122,7 +147,7 @@ export default function ChallengesMenuPage() {
         setPortfolioStatus(portfolioBySlug);
       }
 
-      // 4. Certificate status from certifications table (if present)
+      // 5) Certificate status from certifications table (if present)
       const certificateBySlug = {};
       try {
         const { data: certRows, error: certErr } = await supabase
@@ -135,7 +160,6 @@ export default function ChallengesMenuPage() {
           for (const row of certRows) {
             if (!row.challenge_id) continue;
             const status = (row.status || '').toLowerCase();
-            // Treat any row with status 'approved' as complete
             if (!byChallengeId.has(row.challenge_id)) {
               byChallengeId.set(row.challenge_id, status === 'approved');
             } else if (status === 'approved') {
@@ -145,12 +169,9 @@ export default function ChallengesMenuPage() {
 
           for (const ch of cleaned) {
             const approved = byChallengeId.get(ch.id) === true;
-            certificateBySlug[ch.slug] = approved
-              ? 'complete'
-              : 'in-progress';
+            certificateBySlug[ch.slug] = approved ? 'complete' : 'in-progress';
           }
         } else {
-          // If no rows or error, default to in-progress
           for (const ch of cleaned) {
             certificateBySlug[ch.slug] = 'in-progress';
           }
@@ -216,7 +237,6 @@ export default function ChallengesMenuPage() {
   }
 
   if (!user) {
-    // We’ll almost never see this because of the redirect, but just in case
     return (
       <main
         style={{
@@ -256,12 +276,7 @@ export default function ChallengesMenuPage() {
         }}
       >
         {/* Logo */}
-        <div
-          style={{
-            textAlign: 'center',
-            marginBottom: '1.5rem',
-          }}
-        >
+        <div style={{ textAlign: 'center', marginBottom: '1.1rem' }}>
           <Image
             src="/logo.jpeg"
             alt="Patrick Cameron Style Challenge"
@@ -272,12 +287,57 @@ export default function ChallengesMenuPage() {
           />
         </div>
 
+        {/* ✅ Signed-in identity strip (includes "Not me? Log out") + tier indicator */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: '1.25rem',
+          }}
+        >
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <SignedInAs
+              style={{
+                fontSize: '0.85rem',
+                color: '#9ca3af',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.10)',
+                padding: '0.35rem 0.65rem',
+                borderRadius: 999,
+              }}
+            />
+            <span
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                letterSpacing: '0.04em',
+                padding: '0.35rem 0.6rem',
+                borderRadius: 999,
+                border: `1px solid ${isPro ? 'rgba(34,197,94,0.45)' : 'rgba(250,204,21,0.45)'}`,
+                background: 'rgba(255,255,255,0.04)',
+                color: isPro ? '#22c55e' : '#facc15',
+                textTransform: 'uppercase',
+              }}
+            >
+              {isPro ? 'Pro unlocked' : 'Not unlocked'}
+            </span>
+          </div>
+        </div>
+
         {/* Page title */}
         <section
           style={{
             textAlign: 'center',
             maxWidth: 720,
-            margin: '0 auto 2rem auto',
+            margin: '0 auto 1.5rem auto',
           }}
         >
           <h1
@@ -305,14 +365,52 @@ export default function ChallengesMenuPage() {
           </p>
         </section>
 
+        {/* ✅ Non-pro users: clear CTA to redeem */}
+        {!isPro && (
+          <section style={{ maxWidth: 780, margin: '0 auto 1.8rem auto' }}>
+            <div
+              style={{
+                borderRadius: 16,
+                background:
+                  'radial-gradient(circle at top, #020617 0, #020617 55%, #020617 100%)',
+                border: '1px solid rgba(250,204,21,0.35)',
+                padding: '1rem 1.1rem',
+                textAlign: 'center',
+              }}
+            >
+              <p style={{ margin: 0, color: '#e5e7eb', fontSize: '0.92rem' }}>
+                Your account isn’t unlocked for the Pro collections yet. Redeem a promo code to
+                unlock everything.
+              </p>
+
+              <div style={{ marginTop: 12 }}>
+                <Link
+                  href="/challenges/redeem"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0.6rem 1.3rem',
+                    borderRadius: 999,
+                    background: 'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
+                    color: '#0b1120',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    boxShadow: '0 12px 30px rgba(250,204,21,0.25)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Redeem a promo code
+                </Link>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Starter challenge block */}
         {starterChallenge && (
-          <section
-            style={{
-              maxWidth: 780,
-              margin: '0 auto 2.1rem auto',
-            }}
-          >
+          <section style={{ maxWidth: 780, margin: '0 auto 2.1rem auto' }}>
             <div
               style={{
                 borderRadius: 16,
@@ -350,6 +448,9 @@ export default function ChallengesMenuPage() {
                       overflow: 'hidden',
                       border: '1px solid #1f2937',
                       flexShrink: 0,
+                      backgroundColor: '#020617',
+                      display: 'grid',
+                      placeItems: 'center',
                     }}
                   >
                     <img
@@ -358,7 +459,7 @@ export default function ChallengesMenuPage() {
                       style={{
                         width: '100%',
                         height: '100%',
-                        objectFit: 'cover',
+                        objectFit: 'contain',
                         display: 'block',
                       }}
                     />
@@ -407,8 +508,9 @@ export default function ChallengesMenuPage() {
                     gap: '0.45rem',
                   }}
                 >
+                  {/* ✅ Do not route to MVP v6 (/challenge/*). Use pro architecture. */}
                   <Link
-                    href="/challenge/step1"
+                    href="/challenges/starter-style/step1"
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -428,14 +530,7 @@ export default function ChallengesMenuPage() {
                     Launch the challenge
                   </Link>
 
-                  {/* Progress labels */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '0.75rem',
-                      fontSize: '0.8rem',
-                    }}
-                  >
+                  <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.8rem' }}>
                     {(() => {
                       const p = getPortfolioLabel(starterChallenge.slug);
                       const c = getCertificateLabel(starterChallenge.slug);
@@ -454,12 +549,7 @@ export default function ChallengesMenuPage() {
         )}
 
         {/* Collection One – Essentials */}
-        <section
-          style={{
-            maxWidth: 780,
-            margin: '0 auto 2.1rem auto',
-          }}
-        >
+        <section style={{ maxWidth: 780, margin: '0 auto 2.1rem auto' }}>
           <div
             style={{
               borderRadius: 16,
@@ -467,6 +557,7 @@ export default function ChallengesMenuPage() {
                 'radial-gradient(circle at top, #020617 0, #020617 55%, #020617 100%)',
               border: '1px solid #1f2937',
               padding: '1.3rem 1.3rem 1.6rem',
+              opacity: isPro ? 1 : 0.92,
             }}
           >
             <div
@@ -507,7 +598,6 @@ export default function ChallengesMenuPage() {
               can make money with in the salon.
             </p>
 
-            {/* Essentials grid – 2 columns */}
             <div
               style={{
                 display: 'grid',
@@ -518,11 +608,14 @@ export default function ChallengesMenuPage() {
               {Array.from({ length: 10 }).map((_, index) => {
                 const styleNumber = index + 1;
 
-                // For now, Style 1 uses the real starter-style slug.
                 const slug =
                   styleNumber === 1 ? 'starter-style' : `essentials-${styleNumber}`;
 
-                const isLive = styleNumber === 1; // others "coming soon" for now
+                // Keep only style 1 live until you add real content.
+                const isLive = styleNumber === 1;
+
+                // Non-pro users: treat styles 2–10 as locked (Pro-only by policy)
+                const locked = !isPro && styleNumber !== 1;
 
                 const thumbSrc = '/style_one/finished_reference.jpeg';
 
@@ -540,6 +633,7 @@ export default function ChallengesMenuPage() {
                       display: 'flex',
                       gap: '0.8rem',
                       alignItems: 'center',
+                      opacity: locked ? 0.55 : 1,
                     }}
                   >
                     <div
@@ -550,6 +644,9 @@ export default function ChallengesMenuPage() {
                         overflow: 'hidden',
                         border: '1px solid #111827',
                         flexShrink: 0,
+                        backgroundColor: '#020617',
+                        display: 'grid',
+                        placeItems: 'center',
                       }}
                     >
                       <img
@@ -558,7 +655,7 @@ export default function ChallengesMenuPage() {
                         style={{
                           width: '100%',
                           height: '100%',
-                          objectFit: 'cover',
+                          objectFit: 'contain',
                           display: 'block',
                         }}
                       />
@@ -591,7 +688,27 @@ export default function ChallengesMenuPage() {
                         </div>
                       </div>
 
-                      {isLive ? (
+                      {locked ? (
+                        <Link
+                          href="/challenges/redeem"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '0.5rem 1.1rem',
+                            borderRadius: 999,
+                            border: '1px solid rgba(250,204,21,0.45)',
+                            backgroundColor: '#020617',
+                            color: '#facc15',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            textDecoration: 'none',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Locked — redeem code
+                        </Link>
+                      ) : isLive ? (
                         <Link
                           href={`/challenges/${slug}/step1`}
                           style={{
@@ -639,12 +756,7 @@ export default function ChallengesMenuPage() {
         </section>
 
         {/* Collection Two – Party Styles (coming soon) */}
-        <section
-          style={{
-            maxWidth: 780,
-            margin: '0 auto',
-          }}
-        >
+        <section style={{ maxWidth: 780, margin: '0 auto' }}>
           <div
             style={{
               borderRadius: 16,
@@ -691,6 +803,12 @@ export default function ChallengesMenuPage() {
             </p>
           </div>
         </section>
+
+        {error ? (
+          <p style={{ marginTop: 18, color: '#fca5a5', textAlign: 'center' }}>
+            {error}
+          </p>
+        ) : null}
       </main>
     </div>
   );

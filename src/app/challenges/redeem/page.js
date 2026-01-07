@@ -1,9 +1,11 @@
+// src/app/challenges/redeem/page.js
 'use client'
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '../../../lib/supabaseClient'
+import SignedInAs from '../../../components/SignedInAs'
 
 export default function RedeemPage() {
   const router = useRouter()
@@ -22,9 +24,7 @@ export default function RedeemPage() {
       const sessionUser = sessionData?.session?.user || null
 
       if (!sessionUser) {
-        router.replace(
-          `/welcome-back?next=${encodeURIComponent('/challenges/redeem')}`
-        )
+        router.replace(`/welcome-back?next=${encodeURIComponent('/challenges/redeem')}`)
         return
       }
 
@@ -44,7 +44,9 @@ export default function RedeemPage() {
     e.preventDefault()
     setMessage('')
 
-    if (!code.trim()) {
+    const cleanCode = code.trim()
+
+    if (!cleanCode) {
       setMessage('Please enter a promo code.')
       return
     }
@@ -57,66 +59,83 @@ export default function RedeemPage() {
     setSubmitting(true)
 
     try {
-      // 1. Look up promo code
+      // 1) Look up promo code
       const { data: promo, error: promoErr } = await supabase
         .from('promo_codes')
-        .select('id, code, is_active, max_uses, used_count')
-        .eq('code', code.trim())
+        .select('id, code, tier, is_active, max_uses, used_count')
+        .eq('code', cleanCode)
         .maybeSingle()
 
       if (promoErr) {
-        setMessage('Error validating promo code.')
-        setSubmitting(false)
+        console.error('promo lookup error:', promoErr)
+        setMessage(`Error validating promo code: ${promoErr.message}`)
         return
       }
 
       if (!promo) {
         setMessage('Invalid promo code.')
-        setSubmitting(false)
         return
       }
 
       if (!promo.is_active) {
         setMessage('This promo code is not active.')
-        setSubmitting(false)
         return
       }
 
       if (promo.max_uses !== null && promo.used_count >= promo.max_uses) {
         setMessage('This promo code has reached its usage limit.')
-        setSubmitting(false)
         return
       }
 
-      // 2. Insert user entitlement
-      const { error: entErr } = await supabase
-        .from('user_entitlements')
-        .insert([
-          {
-            user_id: user.id,
-            promo_code_id: promo.id
-          }
-        ])
+      // IMPORTANT: user_entitlements enforces tier IN ('free','pro')
+      const tier = (promo.tier || '').toLowerCase()
+      if (tier !== 'free' && tier !== 'pro') {
+        setMessage(
+          `Promo code tier is invalid in DB: "${promo.tier}". Must be "free" or "pro".`
+        )
+        return
+      }
+
+      // 1.5) Ensure profiles row exists (prevents FK violation on user_entitlements.user_id)
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .upsert({ id: user.id }, { onConflict: 'id' })
+
+      if (profileErr) {
+        console.error('profiles upsert error:', profileErr)
+        setMessage(`Error preparing your account: ${profileErr.message}`)
+        return
+      }
+
+      // 2) Insert user entitlement (matches NOT NULL constraints)
+      const { error: entErr } = await supabase.from('user_entitlements').insert([
+        {
+          user_id: user.id,
+          tier,
+          granted_by_code: promo.code,
+          promo_code_id: promo.id
+          // granted_at defaults to now() in DB
+        }
+      ])
 
       if (entErr) {
-        setMessage('Error assigning entitlement to your account.')
-        setSubmitting(false)
+        console.error('entitlement insert error:', entErr)
+        setMessage(`Error assigning entitlement: ${entErr.message}`)
         return
       }
 
-      // 3. Increment usage count
-      await supabase
+      // 3) Increment usage count (best-effort)
+      const { error: useErr } = await supabase
         .from('promo_codes')
-        .update({ used_count: promo.used_count + 1 })
+        .update({ used_count: (promo.used_count || 0) + 1 })
         .eq('id', promo.id)
 
-      // 4. Flip is_pro flag
-      await supabase
-        .from('profiles')
-        .update({ is_pro: true })
-        .eq('id', user.id)
+      if (useErr) {
+        console.warn('used_count update error:', useErr)
+        // Don't block user; entitlement already granted
+      }
 
-      // 5. Done → go to collections menu
+      // 4) Done → go to collections menu
       router.replace('/challenges/menu')
     } catch (err) {
       console.error(err)
@@ -159,20 +178,8 @@ export default function RedeemPage() {
           'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
       }}
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 480,
-          margin: '0 auto'
-        }}
-      >
-        {/* Logo */}
-        <div
-          style={{
-            textAlign: 'center',
-            marginBottom: '1.75rem'
-          }}
-        >
+      <div style={{ width: '100%', maxWidth: 480, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
           <Image
             src="/logo.jpeg"
             alt="Patrick Cameron Style Challenge"
@@ -183,7 +190,20 @@ export default function RedeemPage() {
           />
         </div>
 
-        {/* Card */}
+        {/* Signed-in identity strip */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+          <SignedInAs
+            style={{
+              fontSize: '0.85rem',
+              color: '#9ca3af',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              padding: '0.35rem 0.65rem',
+              borderRadius: 999
+            }}
+          />
+        </div>
+
         <section
           style={{
             borderRadius: 16,
@@ -214,9 +234,8 @@ export default function RedeemPage() {
               textAlign: 'center'
             }}
           >
-            Enter your promo code from Access Long Hair TV or one of our partner
-            salons or colleges to unlock the Patrick Cameron Style Challenge
-            collections.
+            Enter your promo code from Access Long Hair TV or one of our partner salons or
+            colleges to unlock the Patrick Cameron Style Challenge collections.
           </p>
 
           <form
@@ -259,8 +278,7 @@ export default function RedeemPage() {
                 cursor: submitting ? 'not-allowed' : 'pointer',
                 fontWeight: 700,
                 fontSize: '0.95rem',
-                boxShadow: '0 12px 30px rgba(34,197,94,0.38)',
-                transition: 'transform 0.08s ease-out, box-shadow 0.08s ease-out'
+                boxShadow: '0 12px 30px rgba(34,197,94,0.38)'
               }}
             >
               {submitting ? 'Redeeming…' : 'Redeem code'}

@@ -4,13 +4,13 @@ import { useEffect, useState, Suspense } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
+import SignedInAs from '../../components/SignedInAs';
 
 function WelcomeBackInner() {
   const router = useRouter();
   const sp = useSearchParams();
 
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // resend-link form state
@@ -18,7 +18,14 @@ function WelcomeBackInner() {
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
 
-  const explicitNext = sp.get('next'); // user-supplied next destination
+  // user-supplied next destination (may be absent)
+  const explicitNextRaw = sp.get('next') || '';
+
+  // Only allow internal, relative paths
+  const explicitNext =
+    explicitNextRaw.startsWith('/') && !explicitNextRaw.startsWith('//')
+      ? explicitNextRaw
+      : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -29,23 +36,6 @@ function WelcomeBackInner() {
 
       const sessionUser = data?.session?.user ?? null;
       setUser(sessionUser);
-
-      if (!sessionUser) {
-        setLoading(false);
-        return;
-      }
-
-      // Load profile so we can check is_pro
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, is_pro')
-        .eq('id', sessionUser.id)
-        .maybeSingle();
-
-      if (!profileError && profileData) {
-        setProfile(profileData);
-      }
-
       setLoading(false);
     };
 
@@ -56,25 +46,29 @@ function WelcomeBackInner() {
     };
   }, []);
 
-  // Compute final destination
+  /**
+   * Routing policy for welcome-back:
+   * - If a page sent a next param, honour it (internal paths only).
+   * - Otherwise, default to Pro landing for *this* welcome-back flow.
+   *
+   * This avoids falling back into MVP v6 when the user is coming from /challenges/*
+   * flows and keeps MVP v6 intact because MVP v6 links can still pass their own next.
+   */
   const computeNextPath = () => {
     if (explicitNext) return explicitNext;
-
-    // If no next param:
-    if (profile?.is_pro) return '/challenges';
-    return '/challenge';
+    return '/challenges/menu';
   };
 
   const handleContinue = () => {
-    const nextPath = computeNextPath();
-    router.replace(nextPath);
+    router.replace(computeNextPath());
   };
 
   const handleSendLink = async (e) => {
     e.preventDefault();
     setMessage('');
 
-    if (!email.trim()) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
       setMessage('Please enter your email.');
       return;
     }
@@ -89,12 +83,13 @@ function WelcomeBackInner() {
         localStorage.setItem('pc_next', nextPath);
       } catch {}
 
-      // ✅ FIX: include next in the callback URL so auth/callback can route to Pro correctly
+      // ✅ Pro routing: include flow=pro and next=...
       const callback = new URL('/auth/callback', window.location.origin);
+      callback.searchParams.set('flow', 'pro');
       callback.searchParams.set('next', nextPath);
 
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
+        email: cleanEmail,
         options: { emailRedirectTo: callback.toString() }
       });
 
@@ -133,9 +128,23 @@ function WelcomeBackInner() {
           />
         </div>
 
+        {/* Signed-in identity strip (with sign-out) */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <SignedInAs
+            style={{
+              fontSize: '0.85rem',
+              color: '#9ca3af',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.10)',
+              padding: '0.35rem 0.65rem',
+              borderRadius: 999
+            }}
+          />
+        </div>
+
         <h1 style={{ margin: '6px 0 8px' }}>Welcome back</h1>
         <p style={{ color: '#ccc', marginBottom: 20, textAlign: 'center' }}>
-          You’re signed in as <strong>{user.email}</strong>. Continue to your challenge.
+          Continue to your collections.
         </p>
 
         <button onClick={handleContinue} style={primaryBtn}>
@@ -161,7 +170,7 @@ function WelcomeBackInner() {
 
       <h1 style={{ margin: '6px 0 8px' }}>Sign back in</h1>
       <p style={{ color: '#ccc', marginBottom: 16, maxWidth: 520 }}>
-        Your previous sign-in link may have expired. Enter your email and we’ll send a fresh link.
+        Enter your email and we’ll send a sign-in link.
       </p>
 
       <form
@@ -197,7 +206,13 @@ function WelcomeBackInner() {
 
 export default function WelcomeBackPage() {
   return (
-    <Suspense fallback={<main style={shell}><p style={{ color: '#ccc' }}>Loading…</p></main>}>
+    <Suspense
+      fallback={
+        <main style={shell}>
+          <p style={{ color: '#ccc' }}>Loading…</p>
+        </main>
+      }
+    >
       <WelcomeBackInner />
     </Suspense>
   );

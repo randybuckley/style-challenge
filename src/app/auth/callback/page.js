@@ -1,3 +1,4 @@
+// src/app/auth/callback/page.js
 'use client';
 
 import { Suspense, useEffect } from 'react';
@@ -12,11 +13,13 @@ function AuthCallbackInner() {
     let isMounted = true;
 
     const go = async () => {
+      // 1) Establish session
       const code = sp.get('code');
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) console.warn('[callback] exchangeCodeForSession error:', error.message);
       } else {
+        // hash-based fallback (older flows)
         try {
           const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
           const access_token = hash.get('access_token');
@@ -28,18 +31,66 @@ function AuthCallbackInner() {
         } catch {}
       }
 
-      const queryNext = sp.get('next');
+      // 2) Determine destination
+      const queryNextRaw = sp.get('next') || '';
+
+      // Only allow internal, relative paths
+      const queryNext =
+        queryNextRaw.startsWith('/') && !queryNextRaw.startsWith('//')
+          ? queryNextRaw
+          : '';
+
       let storedNext = null;
-      try { storedNext = localStorage.getItem('pc_next'); } catch {}
-      const next = queryNext || storedNext || '/challenge/step1';
-      try { localStorage.removeItem('pc_next'); } catch {}
+      try {
+        storedNext = localStorage.getItem('pc_next');
+      } catch {}
+
+      try {
+        localStorage.removeItem('pc_next');
+      } catch {}
+
+      // If we already have an explicit destination, honour it.
+      const explicitNext = queryNext || storedNext;
+      if (explicitNext) {
+        if (!isMounted) return;
+        router.replace(explicitNext);
+        return;
+      }
+
+      // Otherwise: decide based on entitlement (source of truth).
+      // Pro users -> /challenges/menu
+      // Non-pro users -> MVP v6 default (/challenge/step1)
+      let fallbackNext = '/challenge/step1';
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionUser = sessionData?.session?.user || null;
+
+        if (sessionUser) {
+          const { data: entRows, error: entErr } = await supabase
+            .from('user_entitlements')
+            .select('tier')
+            .eq('user_id', sessionUser.id)
+            .eq('tier', 'pro')
+            .limit(1);
+
+          if (!entErr && entRows && entRows.length > 0) {
+            fallbackNext = '/challenges/menu';
+          }
+        }
+      } catch (err) {
+        console.warn('[callback] entitlement fallback failed:', err);
+        // Fail open to MVP v6 (existing behaviour)
+      }
 
       if (!isMounted) return;
-      router.replace(next);
+      router.replace(fallbackNext);
     };
 
     go();
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [router, sp]);
 
   return (
@@ -51,7 +102,13 @@ function AuthCallbackInner() {
 
 export default function AuthCallbackPage() {
   return (
-    <Suspense fallback={<main style={{ padding: '2rem', textAlign: 'center', color: '#ccc' }}>Loading…</main>}>
+    <Suspense
+      fallback={
+        <main style={{ padding: '2rem', textAlign: 'center', color: '#ccc' }}>
+          Loading…
+        </main>
+      }
+    >
       <AuthCallbackInner />
     </Suspense>
   );

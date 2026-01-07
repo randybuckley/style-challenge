@@ -1,3 +1,4 @@
+// src/components/AuthForm.js
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -13,14 +14,41 @@ export default function AuthForm() {
       setUser(data.session?.user || null)
     })
 
-    supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null)
     })
+
+    return () => {
+      try {
+        sub?.subscription?.unsubscribe()
+      } catch {}
+    }
   }, [])
 
   const handleMagicLinkSignup = async () => {
-    const { error } = await supabase.auth.signInWithOtp({ email })
-    setMessage(error ? `❌ Login failed: ${error.message}` : '✅ Magic link sent. Check your inbox!')
+    setMessage('')
+
+    const cleanEmail = (email || '').trim()
+    if (!cleanEmail) {
+      setMessage('❌ Please enter your email.')
+      return
+    }
+
+    // ✅ Critical fix:
+    // Force the magic link to return to /auth/callback so your routing logic can decide
+    // between Pro (/challenges/menu) and MVP v6 (/challenge/step1).
+    const callback = `${window.location.origin}/auth/callback`
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: cleanEmail,
+      options: { emailRedirectTo: callback },
+    })
+
+    setMessage(
+      error
+        ? `❌ Login failed: ${error.message}`
+        : '✅ Magic link sent. Check your inbox!'
+    )
   }
 
   const handleSignOut = async () => {
@@ -38,7 +66,7 @@ export default function AuthForm() {
             <input
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={(e) => setEmail(e.target.value)}
               style={{ marginTop: '0.5rem' }}
             />
           </label>
