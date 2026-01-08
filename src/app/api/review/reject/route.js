@@ -11,6 +11,16 @@ const SENDGRID_FROM = process.env.SENDGRID_FROM || 'no-reply@accesslonghair.com'
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 const safe = (s) => String(s ?? '').trim()
 
+function safeSlug(v) {
+  const s = String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  return s || 'starter-style'
+}
+
 export async function POST(req) {
   try {
     let body = {}
@@ -47,10 +57,11 @@ export async function POST(req) {
 
     // Look up submission by review_token on the submissions table
     let toEmail = ''
+    let slug = 'starter-style'
 
     const { data: submission, error: lookupError } = await supabase
       .from('submissions')
-      .select('email')
+      .select('email, challenge_slug')
       .eq('review_token', token)
       .maybeSingle()
 
@@ -64,6 +75,10 @@ export async function POST(req) {
 
     if (submission?.email) {
       toEmail = safe(submission.email)
+    }
+
+    if (submission?.challenge_slug) {
+      slug = safeSlug(submission.challenge_slug)
     }
 
     // Fallback if for some reason email wasn’t stored but we got one from the client
@@ -87,14 +102,23 @@ export async function POST(req) {
 
     sgMail.setApiKey(SENDGRID_API_KEY)
 
+    const step1Href = `${origin.replace(/\/+$/, '')}/challenges/${encodeURIComponent(
+      slug
+    )}/step1`
+    const step1Label = `${host}/challenges/${slug}/step1`
+
     const html = `
       <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;line-height:1.45;">
         <h2 style="margin:0 0 10px;">Thanks for your submission</h2>
         <p>Your portfolio was reviewed but needs a little more work before approval.</p>
         ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
-        ${notes ? `<p><strong>Feedback:</strong><br>${notes.replace(/\n/g, '<br>')}</p>` : ''}
+        ${
+          notes
+            ? `<p><strong>Feedback:</strong><br>${notes.replace(/\n/g, '<br>')}</p>`
+            : ''
+        }
         <p>You can update your images starting from Step 1 here:
-          <a href="${origin}/challenge/step1">${host}/challenge/step1</a>
+          <a href="${step1Href}">${step1Label}</a>
         </p>
         <p>All the best,<br>Patrick</p>
       </div>
@@ -107,7 +131,7 @@ export async function POST(req) {
       html,
     })
 
-    return NextResponse.json({ ok: true, sentTo: toEmail })
+    return NextResponse.json({ ok: true, sentTo: toEmail, slug })
   } catch (e) {
     console.error('review/reject unexpected error:', e)
     return NextResponse.json(
