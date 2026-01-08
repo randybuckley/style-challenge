@@ -12,28 +12,21 @@ export default function ChallengesPage() {
     let cancelled = false
 
     const run = async () => {
-      // Always treat /challenges as an alias of /challenges/menu (Pro canonical)
       const target = '/challenges/menu'
 
-      // If user is not signed in, send them to welcome-back with explicit next
       const { data, error } = await supabase.auth.getSession()
-
       if (cancelled) return
 
-      if (error) {
-        console.error('Session error:', error.message)
-        router.replace(`/welcome-back?next=${encodeURIComponent(target)}`)
-        return
-      }
-
       const sessionUser = data?.session?.user || null
-      if (!sessionUser) {
-        router.replace(`/welcome-back?next=${encodeURIComponent(target)}`)
+
+      // Unknown user (or session lookup error) → Pro login landing
+      if (error || !sessionUser) {
+        router.replace('/challenges/login')
         return
       }
 
-      // Signed in → go straight to Pro menu
-      router.replace(target)
+      // Known user → welcome-back confirmation (then continue to target)
+      router.replace(`/welcome-back?next=${encodeURIComponent(target)}`)
     }
 
     run()
@@ -43,7 +36,6 @@ export default function ChallengesPage() {
     }
   }, [router])
 
-  // Minimal shell while redirecting
   return (
     <main
       style={{
@@ -59,7 +51,7 @@ export default function ChallengesPage() {
         padding: 24,
       }}
     >
-      <p>Loading your collections…</p>
+      <p>Loading…</p>
     </main>
   )
 }
