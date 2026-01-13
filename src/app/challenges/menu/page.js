@@ -31,161 +31,148 @@ export default function ChallengesMenuPage() {
       setLoading(true);
       setError(null);
 
-      // 1) Session
-      const { data: sessionData, error: sessionErr } =
-        await supabase.auth.getSession();
-
-      if (sessionErr) {
-        console.error('Session error:', sessionErr.message);
-        if (!cancelled) {
-          setError('Error checking your session.');
-          setLoading(false);
-        }
-        return;
-      }
-
-      const sessionUser = sessionData?.session?.user || null;
-      if (!sessionUser) {
-        router.replace(
-          `/welcome-back?next=${encodeURIComponent('/challenges/menu')}`,
-        );
-        return;
-      }
-
-      if (cancelled) return;
-      setUser(sessionUser);
-
-      // 2) Entitlement gate (single source of truth: user_entitlements)
       try {
-        const { data: entRows, error: entErr } = await supabase
-          .from('user_entitlements')
-          .select('tier')
-          .eq('user_id', sessionUser.id)
-          .eq('tier', 'pro')
-          .limit(1);
+        // 1) Session
+        const { data: sessionData, error: sessionErr } =
+          await supabase.auth.getSession();
 
-        if (entErr) {
-          console.warn('Entitlement check error:', entErr.message);
-          // Fail closed: treat as non-pro if we cannot confirm entitlement
-          setIsPro(false);
-        } else {
-          setIsPro(!!(entRows && entRows.length > 0));
-        }
-      } catch (e) {
-        console.warn('Entitlement check failed:', e);
-        setIsPro(false);
-      }
-
-      // 3) Load challenges (DB list; we still keep your UI “collections” below)
-      const { data: challengeData, error: challengeErr } = await supabase
-        .from('challenges')
-        .select('id, slug, title, tier, is_pro_only, thumbnail_url, is_active')
-        .eq('is_active', true)
-        .order('id', { ascending: true });
-
-      if (challengeErr) {
-        console.error('Challenge error:', challengeErr.message);
-        if (!cancelled) {
-          setError('Error loading challenges.');
-          setLoading(false);
-        }
-        return;
-      }
-
-      const cleaned = (challengeData || []).map((c) => ({
-        id: c.id,
-        slug: c.slug,
-        title: c.title || 'Untitled Challenge',
-        tier: c.tier || null,
-        is_pro_only: !!c.is_pro_only,
-        thumbnail_url: c.thumbnail_url || null,
-      }));
-
-      if (cancelled) return;
-      setChallenges(cleaned);
-
-      // 4) Portfolio status from uploads table
-      const { data: uploadRows, error: uploadErr } = await supabase
-        .from('uploads')
-        .select('challenge_id, step_number')
-        .eq('user_id', sessionUser.id);
-
-      const portfolioBySlug = {};
-
-      if (!uploadErr && uploadRows && uploadRows.length > 0) {
-        const byChallengeId = new Map();
-
-        for (const row of uploadRows) {
-          if (!row.challenge_id) continue;
-          if (!byChallengeId.has(row.challenge_id)) {
-            byChallengeId.set(row.challenge_id, new Set());
-          }
-          byChallengeId.get(row.challenge_id).add(row.step_number);
+        if (sessionErr) {
+          console.error('Session error:', sessionErr.message);
+          if (!cancelled) setError('Error checking your session.');
+          return;
         }
 
-        for (const ch of cleaned) {
-          const stepSet = byChallengeId.get(ch.id);
-          if (
-            stepSet &&
-            stepSet.has(1) &&
-            stepSet.has(2) &&
-            stepSet.has(3) &&
-            stepSet.has(4)
-          ) {
-            portfolioBySlug[ch.slug] = 'complete';
+        const sessionUser = sessionData?.session?.user || null;
+        if (!sessionUser) {
+          router.replace(
+            `/welcome-back?next=${encodeURIComponent('/challenges/menu')}`,
+          );
+          return;
+        }
+
+        if (cancelled) return;
+        setUser(sessionUser);
+
+        // 2) Entitlement gate (single source of truth: user_entitlements)
+        try {
+          const { data: entRows, error: entErr } = await supabase
+            .from('user_entitlements')
+            .select('tier')
+            .eq('user_id', sessionUser.id)
+            .eq('tier', 'pro')
+            .limit(1);
+
+          if (entErr) {
+            console.warn('Entitlement check error:', entErr.message);
+            // Fail closed: treat as non-pro if we cannot confirm entitlement
+            if (!cancelled) setIsPro(false);
           } else {
-            portfolioBySlug[ch.slug] = 'in-progress';
+            if (!cancelled) setIsPro(!!(entRows && entRows.length > 0));
           }
+        } catch (e) {
+          console.warn('Entitlement check failed:', e);
+          if (!cancelled) setIsPro(false);
         }
-      } else {
-        for (const ch of cleaned) {
-          portfolioBySlug[ch.slug] = 'in-progress';
+
+        // 3) Load challenges
+        const { data: challengeData, error: challengeErr } = await supabase
+          .from('challenges')
+          .select('id, slug, title, tier, is_pro_only, thumbnail_url, is_active')
+          .eq('is_active', true)
+          .order('id', { ascending: true });
+
+        if (challengeErr) {
+          console.error('Challenge error:', challengeErr.message);
+          if (!cancelled) setError('Error loading challenges.');
+          return;
         }
-      }
 
-      if (!cancelled) {
-        setPortfolioStatus(portfolioBySlug);
-      }
+        const cleaned = (challengeData || []).map((c) => ({
+          id: c.id,
+          slug: c.slug,
+          title: c.title || 'Untitled Challenge',
+          tier: c.tier || null,
+          is_pro_only: !!c.is_pro_only,
+          thumbnail_url: c.thumbnail_url || null,
+        }));
 
-      // 5) Certificate status from certifications table (if present)
-      const certificateBySlug = {};
-      try {
-        const { data: certRows, error: certErr } = await supabase
-          .from('certifications')
-          .select('challenge_id, status')
+        if (cancelled) return;
+        setChallenges(cleaned);
+
+        // 4) Portfolio status from uploads table
+        const { data: uploadRows, error: uploadErr } = await supabase
+          .from('uploads')
+          .select('challenge_id, step_number')
           .eq('user_id', sessionUser.id);
 
-        if (!certErr && certRows && certRows.length > 0) {
+        const portfolioBySlug = {};
+
+        if (!uploadErr && uploadRows && uploadRows.length > 0) {
           const byChallengeId = new Map();
-          for (const row of certRows) {
+
+          for (const row of uploadRows) {
             if (!row.challenge_id) continue;
-            const status = (row.status || '').toLowerCase();
             if (!byChallengeId.has(row.challenge_id)) {
-              byChallengeId.set(row.challenge_id, status === 'approved');
-            } else if (status === 'approved') {
-              byChallengeId.set(row.challenge_id, true);
+              byChallengeId.set(row.challenge_id, new Set());
             }
+            byChallengeId.get(row.challenge_id).add(row.step_number);
           }
 
           for (const ch of cleaned) {
-            const approved = byChallengeId.get(ch.id) === true;
-            certificateBySlug[ch.slug] = approved ? 'complete' : 'in-progress';
+            const stepSet = byChallengeId.get(ch.id);
+            if (
+              stepSet &&
+              stepSet.has(1) &&
+              stepSet.has(2) &&
+              stepSet.has(3) &&
+              stepSet.has(4)
+            ) {
+              portfolioBySlug[ch.slug] = 'complete';
+            } else {
+              portfolioBySlug[ch.slug] = 'in-progress';
+            }
           }
         } else {
+          for (const ch of cleaned) {
+            portfolioBySlug[ch.slug] = 'in-progress';
+          }
+        }
+
+        if (!cancelled) setPortfolioStatus(portfolioBySlug);
+
+        // 5) Certificate status from submissions table (authoritative)
+        const certificateBySlug = {};
+        try {
+          const { data: submissionRows, error: subErr } = await supabase
+            .from('submissions')
+            .select('challenge_slug, status')
+            .eq('user_id', sessionUser.id);
+
+          if (!subErr && submissionRows && submissionRows.length > 0) {
+            for (const ch of cleaned) {
+              const approved = submissionRows.some(
+                (row) =>
+                  row.challenge_slug === ch.slug &&
+                  (row.status || '').toLowerCase() === 'approved'
+              );
+
+              certificateBySlug[ch.slug] = approved ? 'complete' : 'in-progress';
+            }
+          } else {
+            for (const ch of cleaned) {
+              certificateBySlug[ch.slug] = 'in-progress';
+            }
+          }
+        } catch (err) {
+          console.warn('Certificate status check failed:', err);
           for (const ch of cleaned) {
             certificateBySlug[ch.slug] = 'in-progress';
           }
         }
-      } catch (err) {
-        console.warn('Certificate status check failed:', err);
-        for (const ch of cleaned) {
-          certificateBySlug[ch.slug] = 'in-progress';
-        }
-      }
 
-      if (!cancelled) {
-        setCertificateStatus(certificateBySlug);
-        setLoading(false);
+        if (!cancelled) setCertificateStatus(certificateBySlug);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -321,7 +308,9 @@ export default function ChallengesMenuPage() {
                 letterSpacing: '0.04em',
                 padding: '0.35rem 0.6rem',
                 borderRadius: 999,
-                border: `1px solid ${isPro ? 'rgba(34,197,94,0.45)' : 'rgba(250,204,21,0.45)'}`,
+                border: `1px solid ${
+                  isPro ? 'rgba(34,197,94,0.45)' : 'rgba(250,204,21,0.45)'
+                }`,
                 background: 'rgba(255,255,255,0.04)',
                 color: isPro ? '#22c55e' : '#facc15',
                 textTransform: 'uppercase',
@@ -392,7 +381,8 @@ export default function ChallengesMenuPage() {
                     justifyContent: 'center',
                     padding: '0.6rem 1.3rem',
                     borderRadius: 999,
-                    background: 'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
+                    background:
+                      'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
                     color: '#0b1120',
                     fontSize: '0.88rem',
                     fontWeight: 700,
@@ -530,7 +520,13 @@ export default function ChallengesMenuPage() {
                     Launch the challenge
                   </Link>
 
-                  <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.8rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '0.75rem',
+                      fontSize: '0.8rem',
+                    }}
+                  >
                     {(() => {
                       const p = getPortfolioLabel(starterChallenge.slug);
                       const c = getCertificateLabel(starterChallenge.slug);
@@ -609,7 +605,9 @@ export default function ChallengesMenuPage() {
                 const styleNumber = index + 1;
 
                 const slug =
-                  styleNumber === 1 ? 'starter-style' : `essentials-${styleNumber}`;
+                  styleNumber === 1
+                    ? 'starter-style'
+                    : `essentials-${styleNumber}`;
 
                 // Keep only style 1 live until you add real content.
                 const isLive = styleNumber === 1;

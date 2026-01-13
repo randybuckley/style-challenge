@@ -7,13 +7,31 @@ const SENDGRID_FROM = process.env.SENDGRID_FROM || 'no-reply@accesslonghair.com'
 
 const safe = (v) => (v == null ? '' : String(v))
 
+function getOrigin(reqUrl) {
+  const url = new URL(reqUrl)
+  return (process.env.NEXT_PUBLIC_SITE_URL || url.origin).replace(/\/+$/, '')
+}
+
+function normalizeActionFromDecision(decisionOrAction) {
+  const v = safe(decisionOrAction).toLowerCase().trim()
+  if (!v) return ''
+  if (v === 'approve' || v === 'approved') return 'approve'
+  if (v === 'reject' || v === 'rejected') return 'reject'
+  // allow passing through "approve"/"reject" explicitly
+  return v
+}
+
+/**
+ * GET is the authoritative, email-link style endpoint:
+ * /api/review/decision?action=approve|reject&token=...&userEmail=...
+ */
 export async function GET(req) {
   try {
     const url = new URL(req.url)
-    const origin = process.env.NEXT_PUBLIC_SITE_URL || url.origin
+    const origin = getOrigin(req.url)
 
-    const action    = safe(url.searchParams.get('action')).toLowerCase()
-    const token     = safe(url.searchParams.get('token'))
+    const action = safe(url.searchParams.get('action')).toLowerCase()
+    const token = safe(url.searchParams.get('token'))
     const userEmail = safe(url.searchParams.get('userEmail') || url.searchParams.get('ue'))
 
     if (!token) {
@@ -25,7 +43,7 @@ export async function GET(req) {
         if (SENDGRID_API_KEY && userEmail) {
           sgMail.setApiKey(SENDGRID_API_KEY)
 
-          const site    = origin.replace(/\/+$/, '')
+          const site = origin
           const logoUrl = `${site}/logo.jpeg`
 
           // NOTE: now includes userEmail in the URL
@@ -78,7 +96,7 @@ export async function GET(req) {
             to: userEmail,
             from: SENDGRID_FROM,
             subject: 'Your Style Challenge result is ready',
-            html
+            html,
           })
         }
       } catch {
@@ -94,7 +112,55 @@ export async function GET(req) {
 
     return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
   } catch {
-    const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+    const origin = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/+$/, '')
     return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
+  }
+}
+
+/**
+ * POST shim for testing / tooling.
+ * Accepts JSON and redirects to the canonical GET URL so the email-link flow stays the single source of truth.
+ *
+ * Example:
+ * curl -i -L -X POST http://localhost:3000/api/review/decision \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"token":"...","decision":"approved","userEmail":"x@y.com"}'
+ */
+export async function POST(req) {
+  try {
+    const origin = getOrigin(req.url)
+
+    let body = {}
+    try {
+      body = await req.json()
+    } catch {
+      body = {}
+    }
+
+    const token = safe(body.token)
+    const userEmail = safe(body.userEmail || body.ue)
+    const action = normalizeActionFromDecision(body.action || body.decision)
+
+    if (!token || (action !== 'approve' && action !== 'reject')) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid payload. Require { token, decision:"approved"|"rejected" } or { token, action:"approve"|"reject" }.',
+        },
+        { status: 400 }
+      )
+    }
+
+    const target =
+      `${origin}/api/review/decision` +
+      `?action=${encodeURIComponent(action)}` +
+      `&token=${encodeURIComponent(token)}` +
+      (userEmail ? `&userEmail=${encodeURIComponent(userEmail)}` : '')
+
+    // 307 preserves method semantics, but curl -L will follow to GET anyway.
+    return NextResponse.redirect(target, 307)
+  } catch (err) {
+    console.error('POST /api/review/decision shim failed', err)
+    return NextResponse.json({ error: 'Failed to proxy decision.' }, { status: 500 })
   }
 }
