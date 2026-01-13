@@ -1,15 +1,35 @@
-cat > middleware.js <<'EOF'
+// middleware.js
 import { NextResponse } from 'next/server'
 
 /**
- * Allow unauthenticated access to:
- * - /review/[token] (the feedback form page)
- * - /api/review/* (decision + reject API handlers)
- * - common public assets
+ * Minimal middleware.
+ *
+ * Purpose:
+ * - Ensure middleware is valid JS (no shell/heredoc lines)
+ * - Allow unauthenticated access to public review + API endpoints
+ * - Otherwise do nothing (preserves existing working flows)
  */
 const ALLOW_PREFIXES = [
+  // Review pages + APIs
   '/review/',
   '/api/review/',
+
+  // Portfolio PDF API (Pro)
+  '/api/pro-portfolio',
+
+  // Certification/review submission (if used)
+  '/api/review-certification',
+  '/api/review-certification/',
+
+  // Certificate generation endpoints (if used)
+  '/api/certificates',
+  '/api/certificates/',
+
+  // Other API endpoints you may have in prod
+  '/api/generate',
+  '/api/generate/',
+
+  // Next.js internals + common public assets
   '/_next',
   '/static',
   '/favicon.ico',
@@ -19,20 +39,19 @@ const ALLOW_PREFIXES = [
 export function middleware(req) {
   const { pathname } = req.nextUrl
 
-  // If path starts with any allowlisted prefix, let it through untouched.
-  if (ALLOW_PREFIXES.some(p => pathname.startsWith(p))) {
+  // Allowlisted prefixes pass straight through.
+  if (ALLOW_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
   }
 
-  // Otherwise, do nothing here (preserves existing working flows).
+  // Default: do nothing.
   return NextResponse.next()
 }
 
 /**
- * Run on all routes (except static asset files with extensions),
- * so our allowlist above actually applies.
+ * Run on all routes except static files with extensions.
+ * (So the allowlist applies to app routes + API routes.)
  */
 export const config = {
   matcher: ['/((?!.*\\.(?:ico|png|jpg|jpeg|svg|gif|webp|css|js|map)$).*)'],
 }
-EOF
