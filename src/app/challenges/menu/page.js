@@ -54,6 +54,7 @@ export default function ChallengesMenuPage() {
         if (cancelled) return;
         setUser(sessionUser);
 
+        // Pro entitlement
         const { data: entitlements } = await supabase
           .from('user_entitlements')
           .select('tier')
@@ -63,35 +64,74 @@ export default function ChallengesMenuPage() {
 
         if (!cancelled) setIsPro(!!entitlements?.length);
 
+        // Challenge lookup: id -> slug
+        const { data: challenges } = await supabase
+          .from('challenges')
+          .select('id, slug');
+
+        const challengeIdToSlug = {};
+        (challenges || []).forEach((c) => {
+          if (c?.id && c?.slug) challengeIdToSlug[c.id] = c.slug;
+        });
+
+        // ✅ tolerate either uploads.challenge_id format:
+        // 1) UUID challenge id (map via challenges table)
+        // 2) already a slug (use directly)
+        const resolveSlug = (challengeId) => {
+          if (!challengeId) return null;
+
+          const mapped = challengeIdToSlug[challengeId];
+          if (mapped) return mapped;
+
+          // Treat as slug fallback (migration-safe)
+          if (typeof challengeId === 'string') return challengeId;
+
+          return null;
+        };
+
+        // Uploads (many rows per step; we need distinct step_numbers per slug)
         const { data: uploads } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
           .eq('user_id', sessionUser.id);
 
-        const portfolio = {};
-        uploads?.forEach((row) => {
-          if (!portfolio[row.challenge_id]) {
-            portfolio[row.challenge_id] = new Set();
+        const portfolioStepsBySlug = {};
+        (uploads || []).forEach((row) => {
+          const slug = resolveSlug(row.challenge_id);
+          if (!slug) return;
+
+          if (!portfolioStepsBySlug[slug]) {
+            portfolioStepsBySlug[slug] = new Set();
           }
-          portfolio[row.challenge_id].add(row.step_number);
+          portfolioStepsBySlug[slug].add(row.step_number);
         });
 
+        const starterSteps = portfolioStepsBySlug['starter-style'] || new Set();
+        const hasAnyStarter = starterSteps.size > 0;
+        const starterComplete =
+          starterSteps.has(1) && starterSteps.has(2) && starterSteps.has(3) && starterSteps.has(4);
+
         const portfolioBySlug = {
-          'starter-style':
-            portfolio?.['starter-style']?.size === 4 ? 'complete' : 'in-progress',
+          'starter-style': starterComplete ? 'complete' : hasAnyStarter ? 'in-progress' : 'not-started',
         };
 
+        // Submissions (certificate / approval)
         const { data: submissions } = await supabase
           .from('submissions')
           .select('challenge_slug, status')
           .eq('user_id', sessionUser.id);
 
+        const starterSubmissions = (submissions || []).filter(
+          (s) => s?.challenge_slug === 'starter-style'
+        );
+
+        const starterApproved = starterSubmissions.some(
+          (s) => (s.status || '').toLowerCase() === 'approved'
+        );
+        const starterHasAnySubmission = starterSubmissions.length > 0;
+
         const certificateBySlug = {
-          'starter-style': submissions?.some(
-            (s) => s.challenge_slug === 'starter-style' && s.status === 'approved'
-          )
-            ? 'complete'
-            : 'in-progress',
+          'starter-style': starterApproved ? 'complete' : starterHasAnySubmission ? 'in-progress' : 'not-started',
         };
 
         if (!cancelled) {
@@ -124,6 +164,9 @@ export default function ChallengesMenuPage() {
   const essentialsCompleted =
     portfolioStatus['starter-style'] === 'complete' &&
     certificateStatus['starter-style'] === 'complete';
+
+  const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
+  const starterCertState = certificateStatus['starter-style'] || 'not-started';
 
   return (
     <div style={pageShell}>
@@ -173,6 +216,43 @@ export default function ChallengesMenuPage() {
                   The original free challenge that introduces the Style Challenge
                   format.
                 </p>
+
+                {/* ✅ Progress + certificate indicators */}
+                <div style={statusRow}>
+                  <span
+                    style={
+                      starterPortfolioState === 'complete'
+                        ? statusPillComplete
+                        : starterPortfolioState === 'in-progress'
+                          ? statusPillProgress
+                          : statusPillIdle
+                    }
+                    title="Portfolio progress"
+                  >
+                    {starterPortfolioState === 'complete'
+                      ? 'PORTFOLIO: COMPLETE'
+                      : starterPortfolioState === 'in-progress'
+                        ? 'PORTFOLIO: IN PROGRESS'
+                        : 'PORTFOLIO: NOT STARTED'}
+                  </span>
+
+                  <span
+                    style={
+                      starterCertState === 'complete'
+                        ? statusPillComplete
+                        : starterCertState === 'in-progress'
+                          ? statusPillProgress
+                          : statusPillIdle
+                    }
+                    title="Certificate progress"
+                  >
+                    {starterCertState === 'complete'
+                      ? 'CERTIFICATE: APPROVED'
+                      : starterCertState === 'in-progress'
+                        ? 'CERTIFICATE: IN REVIEW'
+                        : 'CERTIFICATE: NOT SUBMITTED'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -366,6 +446,44 @@ const greenButton = (isNarrow) => ({
   width: isNarrow ? '100%' : 'auto', // ✅ full-width on mobile
   boxSizing: 'border-box',
 });
+
+const statusRow = {
+  marginTop: 10,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 8,
+};
+
+const statusPillBase = {
+  fontSize: '0.7rem',
+  fontWeight: 800,
+  padding: '0.25rem 0.55rem',
+  borderRadius: 999,
+  letterSpacing: '0.03em',
+  border: '1px solid rgba(255,255,255,0.12)',
+  whiteSpace: 'nowrap',
+};
+
+const statusPillComplete = {
+  ...statusPillBase,
+  background: 'rgba(34,197,94,0.15)',
+  color: '#22c55e',
+  borderColor: 'rgba(34,197,94,0.35)',
+};
+
+const statusPillProgress = {
+  ...statusPillBase,
+  background: 'rgba(250,204,21,0.15)',
+  color: '#facc15',
+  borderColor: 'rgba(250,204,21,0.35)',
+};
+
+const statusPillIdle = {
+  ...statusPillBase,
+  background: 'rgba(148,163,184,0.12)',
+  color: '#94a3b8',
+  borderColor: 'rgba(148,163,184,0.25)',
+};
 
 const collectionCard = { marginBottom: 32 };
 const collectionInner = {
