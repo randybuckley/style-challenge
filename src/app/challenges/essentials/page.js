@@ -18,7 +18,9 @@ export default function EssentialsCollectionPage() {
   // ✅ entitlement source-of-truth
   const [isPro, setIsPro] = useState(false)
 
-  // status keyed by slug: 'in-progress' | 'complete'
+  // status keyed by slug:
+  // portfolio: 'not-started' | 'in-progress' | 'complete'
+  // certificate: 'not-submitted' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({})
   const [certificateStatus, setCertificateStatus] = useState({})
 
@@ -89,7 +91,7 @@ export default function EssentialsCollectionPage() {
           if (!cancelled) setIsPro(false)
         }
 
-        // 3) Portfolio status from uploads table (using challenge_id -> slug mapping via challenges table)
+        // 3) Portfolio status from uploads table (challenge_id -> slug mapping via challenges table)
         const { data: challengeRows, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, is_active')
@@ -110,27 +112,30 @@ export default function EssentialsCollectionPage() {
           .eq('user_id', sessionUser.id)
 
         const portfolioBySlug = {}
+        // default: not-started (until we see uploads)
+        for (const s of styles) {
+          portfolioBySlug[s.slug] = 'not-started'
+        }
+
         if (!uploadErr && uploadRows && uploadRows.length > 0) {
           const bySlug = new Map()
 
           for (const row of uploadRows) {
-            const slug = idToSlug.get(row.challenge_id)
-            if (!slug) continue
-            if (!bySlug.has(slug)) bySlug.set(slug, new Set())
-            bySlug.get(slug).add(row.step_number)
+            const sSlug = idToSlug.get(row.challenge_id)
+            if (!sSlug) continue
+            if (!bySlug.has(sSlug)) bySlug.set(sSlug, new Set())
+            bySlug.get(sSlug).add(row.step_number)
           }
 
           for (const s of styles) {
             const set = bySlug.get(s.slug)
-            if (set && set.has(1) && set.has(2) && set.has(3) && set.has(4)) {
+            if (!set || set.size === 0) {
+              portfolioBySlug[s.slug] = 'not-started'
+            } else if (set.has(1) && set.has(2) && set.has(3) && set.has(4)) {
               portfolioBySlug[s.slug] = 'complete'
             } else {
               portfolioBySlug[s.slug] = 'in-progress'
             }
-          }
-        } else {
-          for (const s of styles) {
-            portfolioBySlug[s.slug] = 'in-progress'
           }
         }
 
@@ -138,6 +143,11 @@ export default function EssentialsCollectionPage() {
 
         // 4) Certificate status from submissions table (authoritative)
         const certificateBySlug = {}
+        // default: not-submitted (until we see a row)
+        for (const s of styles) {
+          certificateBySlug[s.slug] = 'not-submitted'
+        }
+
         try {
           const { data: submissionRows, error: subErr } = await supabase
             .from('submissions')
@@ -145,24 +155,34 @@ export default function EssentialsCollectionPage() {
             .eq('user_id', sessionUser.id)
 
           if (!subErr && submissionRows && submissionRows.length > 0) {
-            for (const s of styles) {
-              const approved = submissionRows.some(
-                (row) =>
-                  row.challenge_slug === s.slug &&
-                  (row.status || '').toLowerCase() === 'approved'
-              )
-              certificateBySlug[s.slug] = approved ? 'complete' : 'in-progress'
+            const latestBySlug = new Map()
+
+            // If multiple rows exist, we just need to know:
+            // - any approved => complete
+            // - otherwise => in-progress
+            // - none => not-submitted
+            for (const row of submissionRows) {
+              const sSlug = row?.challenge_slug
+              if (!sSlug) continue
+              const st = (row.status || '').toLowerCase()
+              if (!latestBySlug.has(sSlug)) latestBySlug.set(sSlug, [])
+              latestBySlug.get(sSlug).push(st)
             }
-          } else {
+
             for (const s of styles) {
-              certificateBySlug[s.slug] = 'in-progress'
+              const statuses = latestBySlug.get(s.slug)
+              if (!statuses || statuses.length === 0) {
+                certificateBySlug[s.slug] = 'not-submitted'
+              } else if (statuses.some((st) => st === 'approved')) {
+                certificateBySlug[s.slug] = 'complete'
+              } else {
+                certificateBySlug[s.slug] = 'in-progress'
+              }
             }
           }
         } catch (err) {
           console.warn('Certificate status check failed:', err)
-          for (const s of styles) {
-            certificateBySlug[s.slug] = 'in-progress'
-          }
+          // keep defaults
         }
 
         if (!cancelled) setCertificateStatus(certificateBySlug)
@@ -179,21 +199,25 @@ export default function EssentialsCollectionPage() {
   }, [router])
 
   const getPortfolioLabel = (slug) => {
-    const status = portfolioStatus[slug] || 'in-progress'
-    const complete = status === 'complete'
-    return {
-      text: complete ? 'Portfolio – complete' : 'Portfolio – in progress',
-      color: complete ? '#facc15' : '#e5e7eb',
+    const status = portfolioStatus[slug] || 'not-started'
+    if (status === 'complete') {
+      return { text: 'Portfolio — complete', color: '#22c55e' }
     }
+    if (status === 'in-progress') {
+      return { text: 'Portfolio — in progress', color: '#facc15' }
+    }
+    return { text: 'Portfolio — not started', color: '#9ca3af' }
   }
 
   const getCertificateLabel = (slug) => {
-    const status = certificateStatus[slug] || 'in-progress'
-    const complete = status === 'complete'
-    return {
-      text: complete ? 'Certificate – complete' : 'Certificate – in progress',
-      color: complete ? '#facc15' : '#e5e7eb',
+    const status = certificateStatus[slug] || 'not-submitted'
+    if (status === 'complete') {
+      return { text: 'Certificate — complete', color: '#22c55e' }
     }
+    if (status === 'in-progress') {
+      return { text: 'Certificate — in progress', color: '#facc15' }
+    }
+    return { text: 'Certificate — not submitted', color: '#9ca3af' }
   }
 
   if (loading) {
@@ -344,8 +368,7 @@ export default function EssentialsCollectionPage() {
                     justifyContent: 'center',
                     padding: '0.6rem 1.3rem',
                     borderRadius: 999,
-                    background:
-                      'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
+                    background: 'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
                     color: '#0b1120',
                     fontSize: '0.88rem',
                     fontWeight: 800,
@@ -421,11 +444,39 @@ export default function EssentialsCollectionPage() {
                       {s.title}
                     </div>
 
-                    <div style={{ fontSize: '0.82rem', color: '#e5e7eb', marginTop: 6 }}>
-                      <div style={{ marginBottom: 2, color: portfolio.color }}>
+                    {/* ✅ Menu-style progress container */}
+                    <div
+                      style={{
+                        marginTop: 8,
+                        display: 'inline-flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        padding: '0.55rem 0.7rem',
+                        borderRadius: 12,
+                        border: '1px solid rgba(255,255,255,0.10)',
+                        background: 'rgba(255,255,255,0.04)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          color: portfolio.color,
+                          lineHeight: 1.2,
+                        }}
+                      >
                         {portfolio.text}
                       </div>
-                      <div style={{ color: certificate.color }}>{certificate.text}</div>
+                      <div
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          color: certificate.color,
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {certificate.text}
+                      </div>
                     </div>
 
                     <div style={{ marginTop: 10 }}>
