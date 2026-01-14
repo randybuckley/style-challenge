@@ -1,3 +1,4 @@
+// src/app/challenges/menu/page.js
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -17,6 +18,25 @@ export default function ChallengesMenuPage() {
   const [isPro, setIsPro] = useState(false);
   const [portfolioStatus, setPortfolioStatus] = useState({});
   const [certificateStatus, setCertificateStatus] = useState({});
+
+  // ✅ responsive helper for inline styles (prevents mobile overflow)
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mq = window.matchMedia('(max-width: 520px)');
+    const apply = () => setIsNarrow(!!mq.matches);
+
+    apply();
+    if (mq.addEventListener) mq.addEventListener('change', apply);
+    else mq.addListener(apply);
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', apply);
+      else mq.removeListener(apply);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +127,7 @@ export default function ChallengesMenuPage() {
 
   return (
     <div style={pageShell}>
-      <main style={pageMain}>
+      <main style={pageMain(isNarrow)}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 18 }}>
           <Image
@@ -121,7 +141,7 @@ export default function ChallengesMenuPage() {
         </div>
 
         {/* Signed-in strip */}
-        <div style={identityRow}>
+        <div style={identityRow(isNarrow)}>
           <SignedInAs style={identityPill} />
           <span style={isPro ? proBadge : lockedBadge}>
             {isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}
@@ -139,14 +159,14 @@ export default function ChallengesMenuPage() {
 
         {/* Starter Challenge */}
         <section style={cardSection}>
-          <div style={card}>
+          <div style={card(isNarrow)}>
             <div style={cardLeft}>
               <img
                 src="/style_one/finished_reference.jpeg"
                 alt="Starter Style Challenge"
                 style={thumb}
               />
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={eyebrow}>Starter Challenge</div>
                 <div style={cardTitle}>Starter Style Challenge</div>
                 <p style={cardText}>
@@ -156,8 +176,11 @@ export default function ChallengesMenuPage() {
               </div>
             </div>
 
-            <div style={cardRight}>
-              <Link href="/challenges/starter-style/step1" style={greenButton}>
+            <div style={cardRight(isNarrow)}>
+              <Link
+                href="/challenges/starter-style/step1"
+                style={greenButton(isNarrow)}
+              >
                 Launch the challenge
               </Link>
             </div>
@@ -188,10 +211,7 @@ export default function ChallengesMenuPage() {
                 </span>
               </div>
 
-              <Link
-                href="/challenges/essentials"
-                style={greenButton}
-              >
+              <Link href="/challenges/essentials" style={greenButton(isNarrow)}>
                 Launch the collection
               </Link>
             </div>
@@ -227,16 +247,18 @@ const pageShell = {
   background: '#000',
   display: 'flex',
   justifyContent: 'center',
+  overflowX: 'hidden', // ✅ prevents sideways scroll from any child overflow
 };
 
-const pageMain = {
+const pageMain = (isNarrow) => ({
   width: '100%',
   maxWidth: 960,
-  padding: '2.5rem 1.25rem 3rem',
+  padding: isNarrow ? '2.2rem 1rem 3rem' : '2.5rem 1.25rem 3rem',
   color: '#e5e7eb',
   fontFamily:
     'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
-};
+  boxSizing: 'border-box',
+});
 
 const loadingShell = {
   minHeight: '100vh',
@@ -247,12 +269,15 @@ const loadingShell = {
   justifyContent: 'center',
 };
 
-const identityRow = {
+const identityRow = (isNarrow) => ({
   display: 'flex',
   justifyContent: 'center',
   gap: 10,
   marginBottom: 20,
-};
+  flexWrap: 'wrap', // ✅ long emails won’t force overflow
+  padding: isNarrow ? '0 6px' : 0,
+  boxSizing: 'border-box',
+});
 
 const identityPill = {
   fontSize: '0.85rem',
@@ -261,6 +286,8 @@ const identityPill = {
   border: '1px solid rgba(255,255,255,0.1)',
   padding: '0.35rem 0.65rem',
   borderRadius: 999,
+  maxWidth: '100%',
+  boxSizing: 'border-box',
 };
 
 const proBadge = {
@@ -270,6 +297,7 @@ const proBadge = {
   borderRadius: 999,
   border: '1px solid rgba(34,197,94,0.45)',
   color: '#22c55e',
+  whiteSpace: 'nowrap',
 };
 
 const lockedBadge = {
@@ -284,24 +312,34 @@ const introText = { fontSize: '0.95rem', color: '#cbd5f5' };
 
 const cardSection = { marginBottom: 30 };
 
-const card = {
+const card = (isNarrow) => ({
   borderRadius: 16,
   background: '#020617',
   border: '1px solid #1e293b',
   padding: '1.1rem 1.3rem',
   display: 'flex',
+  flexDirection: isNarrow ? 'column' : 'row', // ✅ stack on mobile
   justifyContent: 'space-between',
-  gap: 20,
-};
+  alignItems: isNarrow ? 'stretch' : 'center',
+  gap: isNarrow ? 14 : 20,
+  boxSizing: 'border-box',
+  overflow: 'hidden',
+});
 
 const cardLeft = { display: 'flex', gap: 16, alignItems: 'center' };
-const cardRight = { display: 'flex', alignItems: 'center' };
+
+const cardRight = (isNarrow) => ({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: isNarrow ? 'stretch' : 'flex-end',
+});
 
 const thumb = {
   width: 72,
   height: 72,
   borderRadius: 12,
   objectFit: 'contain',
+  flexShrink: 0,
 };
 
 const eyebrow = {
@@ -312,9 +350,9 @@ const eyebrow = {
 };
 
 const cardTitle = { fontSize: '1rem', fontWeight: 600 };
-const cardText = { fontSize: '0.85rem', color: '#cbd5f5' };
+const cardText = { fontSize: '0.85rem', color: '#cbd5f5', margin: 0 };
 
-const greenButton = {
+const greenButton = (isNarrow) => ({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -325,7 +363,9 @@ const greenButton = {
   fontWeight: 700,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
-};
+  width: isNarrow ? '100%' : 'auto', // ✅ full-width on mobile
+  boxSizing: 'border-box',
+});
 
 const collectionCard = { marginBottom: 32 };
 const collectionInner = {
@@ -354,6 +394,7 @@ const heroWrap = {
 const heroImg = {
   width: '100%',
   borderRadius: 14,
+  display: 'block',
 };
 
 const completedBadge = {
