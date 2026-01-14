@@ -36,7 +36,7 @@ const ALLOW_PREFIXES = [
   '/images',
 ]
 
-export function middleware(req) {
+export function proxy(req) {
   const { pathname } = req.nextUrl
 
   // Allowlisted prefixes pass straight through.

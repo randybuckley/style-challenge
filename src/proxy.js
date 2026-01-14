@@ -1,7 +1,7 @@
 // src/middleware.js
 import { NextResponse } from 'next/server'
 
-export function middleware(req) {
+export function proxy(req) {
   const url = new URL(req.url)
 
   // Intercept only the decision endpoint
