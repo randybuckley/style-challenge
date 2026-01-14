@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '../../../../lib/supabaseClient'
+import SignedInAs from '../../../../components/SignedInAs'
 
 const STORAGE_PREFIX =
   'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
@@ -325,7 +326,7 @@ export default function ChallengePortfolioPage() {
   return (
     <main style={pageShell}>
       <div style={introWrap}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+        <div style={{ textAlign: 'center', marginBottom: 10 }}>
           <Image
             src="/logo.jpeg"
             alt="Patrick Cameron Style Challenge"
@@ -334,6 +335,11 @@ export default function ChallengePortfolioPage() {
             style={{ height: 'auto', maxWidth: '100%' }}
             priority
           />
+        </div>
+
+        {/* ✅ Signed-in identity strip with sign-out */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <SignedInAs />
         </div>
 
         <h1 style={introTitle}>{nameLine}</h1>

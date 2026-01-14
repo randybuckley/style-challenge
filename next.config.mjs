@@ -9,8 +9,6 @@ const nextConfig = {
       },
     ],
   },
-  // Keep builds unblocked while moving fast
-  eslint: { ignoreDuringBuilds: true },
-};
+}
 
-export default nextConfig;
+export default nextConfig

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { supabase } from '../../../../lib/supabaseClient'
+import SignedInAs from '../../../../components/SignedInAs'
 
 export default function ProCertifyPage() {
   const router = useRouter()
@@ -40,13 +41,13 @@ export default function ProCertifyPage() {
   const setErr = (t) => setBanner({ type: 'err', text: toText(t) })
 
   async function handleSubmit() {
-    // ✅ DEMO: no Supabase, no API — go straight to /result/approved?demo=1
+    // ✅ DEMO: no Supabase, no API — go straight to PRO approved result page
     if (demo) {
       const qs = []
       if (adminDemo) qs.push('admin_demo=true')
       qs.push('demo=1')
       const suffix = qs.length ? `?${qs.join('&')}` : ''
-      router.push(`/result/approved${suffix}`)
+      router.push(`/challenges/${encodeURIComponent(slug)}/result/approved${suffix}`)
       return
     }
 
@@ -217,6 +218,11 @@ export default function ProCertifyPage() {
         />
       </div>
 
+      {/* ✅ Signed-in identity strip with sign-out */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+        <SignedInAs />
+      </div>
+
       <h1 style={title}>Become Certified</h1>
 
       <div style={frame}>
@@ -268,7 +274,9 @@ export default function ProCertifyPage() {
 
         <div style={ctaRow}>
           <button
-            onClick={() => router.push(`/challenges/${encodeURIComponent(slug)}/portfolio${backQs}`)}
+            onClick={() =>
+              router.push(`/challenges/${encodeURIComponent(slug)}/portfolio${backQs}`)
+            }
             style={{ ...btn, background: '#444' }}
           >
             ← Back to your Portfolio
@@ -343,7 +351,7 @@ const pageShell = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+  fontFamily: 'system-ui,-apple-system, Segoe UI, Roboto, Helvetica,Arial,sans-serif',
 }
 const title = {
   margin: '6px 0 14px',

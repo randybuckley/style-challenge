@@ -195,14 +195,6 @@ function ApprovedResultInner() {
     marginTop: 2,
   }
 
-  const tiny = {
-    marginTop: 10,
-    fontSize: 11,
-    color: '#777',
-    userSelect: 'all',
-    wordBreak: 'break-all',
-  }
-
   return (
     <main style={pageShell}>
       {/* Logo header */}
@@ -265,17 +257,6 @@ function ApprovedResultInner() {
         >
           {busy ? 'Preparing your certificate…' : 'Download your certificate'}
         </button>
-
-        {/* token + email for debugging / support */}
-        <div style={tiny}>
-          token: {token || '(missing)'}
-          {userEmail && (
-            <>
-              <br />
-              email: {userEmail}
-            </>
-          )}
-        </div>
       </div>
     </main>
   )

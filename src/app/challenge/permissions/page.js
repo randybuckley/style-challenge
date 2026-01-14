@@ -1,20 +1,56 @@
 // src/app/challenge/permissions/page.js
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabaseClient'
+import SignedInAs from '../../../components/SignedInAs'
 
 const STORAGE_KEY = 'style_challenge_image_consent_v1'
 
-export default function PermissionsPage() {
+// ✅ Pro routing helper (used elsewhere in your Pro flow)
+const PRO_NEXT_KEY = 'pc_next'
+
+function PermissionsInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [consent, setConsent] = useState(null) // null = not chosen, true/false = chosen
-  const [loaded, setLoaded] = useState(false)  // page ready for interaction
+  const [loaded, setLoaded] = useState(false) // page ready for interaction
   const [user, setUser] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+
+  const queryNext = useMemo(() => {
+    try {
+      return (searchParams?.get('next') || '').trim()
+    } catch {
+      return ''
+    }
+  }, [searchParams])
+
+  // ✅ Decide where to send the user after permissions are saved:
+  // Priority:
+  //  1) pc_next (Pro flow state, stored pre-login)
+  //  2) ?next= query param (if you choose to use it)
+  //  3) default → Pro menu (prepares for MVP v6 deletion)
+  const resolveNextPath = () => {
+    let storedNext = ''
+
+    if (typeof window !== 'undefined') {
+      try {
+        storedNext = (window.localStorage.getItem(PRO_NEXT_KEY) || '').trim()
+      } catch {}
+    }
+
+    const candidate = (queryNext || storedNext || '').trim()
+
+    // Only allow internal paths; refuse absolute/external URLs
+    if (candidate && candidate.startsWith('/')) return candidate
+
+    // ✅ IMPORTANT: default to Pro, not MVP v6
+    return '/challenges/menu'
+  }
 
   // Load any saved preference from localStorage and initialise Supabase profile
   useEffect(() => {
@@ -26,9 +62,7 @@ export default function PermissionsPage() {
         const raw = window.localStorage.getItem(STORAGE_KEY)
         if (raw === 'true') consentFromLocal = true
         if (raw === 'false') consentFromLocal = false
-        if (consentFromLocal !== null) {
-          setConsent(consentFromLocal)
-        }
+        if (consentFromLocal !== null) setConsent(consentFromLocal)
       } catch {}
     }
 
@@ -69,18 +103,17 @@ export default function PermissionsPage() {
 
       // Create profile if missing
       if (!effectiveProfile) {
-        const { data: insertedProfile, error: insertError } =
-          await supabase
-            .from('profiles')
-            .upsert(
-              {
-                id: sessionUser.id,
-                email: sessionUser.email || null,
-              },
-              { onConflict: 'id' }
-            )
-            .select('id, email, media_consent')
-            .single()
+        const { data: insertedProfile, error: insertError } = await supabase
+          .from('profiles')
+          .upsert(
+            {
+              id: sessionUser.id,
+              email: sessionUser.email || null,
+            },
+            { onConflict: 'id' }
+          )
+          .select('id, email, media_consent')
+          .single()
 
         if (insertError) {
           setError('There was a problem creating your profile.')
@@ -122,20 +155,19 @@ export default function PermissionsPage() {
     setError(null)
 
     // 1) Save into Supabase
-    const { data: upserted, error: upsertError } =
-      await supabase
-        .from('profiles')
-        .upsert(
-          {
-            id: user.id,
-            email: user.email || null,
-            media_consent: consent,
-            media_consent_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' }
-        )
-        .select('id')
-        .single()
+    const { data: upserted, error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          email: user.email || null,
+          media_consent: consent,
+          media_consent_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      )
+      .select('id')
+      .single()
 
     if (upsertError || !upserted) {
       setError('There was a problem saving your choice. Please try again.')
@@ -150,8 +182,17 @@ export default function PermissionsPage() {
       } catch {}
     }
 
-    // 3) Continue into the challenge
-    router.push('/challenge/step1')
+    // 3) Continue into the correct flow (Pro if pc_next/next exists; else Pro menu)
+    const nextPath = resolveNextPath()
+
+    // If we used pc_next, clear it so it doesn’t affect future navigation.
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(PRO_NEXT_KEY)
+      } catch {}
+    }
+
+    router.push(nextPath)
   }
 
   const currentChoiceText =
@@ -173,14 +214,15 @@ export default function PermissionsPage() {
           />
         </div>
 
+        {/* ✅ Logged-in strip (Not you? Log out) */}
+        <div style={signedInWrap}>
+          <SignedInAs style={signedInPill} />
+        </div>
+
         {/* Patrick intro */}
         <div style={heroRow}>
           <div style={portraitWrap}>
-            <img
-              src="/press_shot.JPG"
-              alt="Patrick Cameron"
-              style={portrait}
-            />
+            <img src="/press_shot.JPG" alt="Patrick Cameron" style={portrait} />
           </div>
 
           <div style={heroText}>
@@ -275,6 +317,32 @@ export default function PermissionsPage() {
   )
 }
 
+// ✅ Suspense wrapper so useSearchParams is allowed during build/prerender
+export default function PermissionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          style={{
+            minHeight: '100vh',
+            background: '#000',
+            color: '#e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily:
+              'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+          }}
+        >
+          Loading…
+        </main>
+      }
+    >
+      <PermissionsInner />
+    </Suspense>
+  )
+}
+
 /* ===== Styles ===== */
 
 const pageShell = {
@@ -309,6 +377,21 @@ const logo = {
   height: 'auto',
   borderRadius: 14,
   opacity: 0.95,
+}
+
+const signedInWrap = {
+  display: 'flex',
+  justifyContent: 'center',
+  marginBottom: 14,
+}
+
+const signedInPill = {
+  fontSize: '0.85rem',
+  color: '#9ca3af',
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(255,255,255,0.10)',
+  padding: '0.35rem 0.65rem',
+  borderRadius: 999,
 }
 
 const heroRow = {
