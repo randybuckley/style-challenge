@@ -16,10 +16,12 @@ export default function ChallengesMenuPage() {
   const [error, setError] = useState(null);
 
   const [isPro, setIsPro] = useState(false);
+
+  // keyed by slug: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
+  // keyed by slug: 'not-submitted' | 'in-review' | 'approved' | 'rejected'
   const [certificateStatus, setCertificateStatus] = useState({});
 
-  // ✅ responsive helper for inline styles (prevents mobile overflow)
   const [isNarrow, setIsNarrow] = useState(false);
 
   useEffect(() => {
@@ -41,10 +43,30 @@ export default function ChallengesMenuPage() {
   useEffect(() => {
     let cancelled = false;
 
+    const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
+
+    const getCertificateStateFromRows = (rows) => {
+      if (!rows || rows.length === 0) return 'not-submitted';
+
+      const statuses = rows.map((r) => normalizeStatus(r.status));
+
+      // Order of precedence:
+      if (statuses.includes('approved')) return 'approved';
+      if (statuses.includes('rejected')) return 'rejected';
+
+      // Anything else that exists means "in review" (submitted/pending/in_review/etc)
+      return 'in-review';
+    };
+
     const load = async () => {
+      setLoading(true);
+      setError(null);
+
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const sessionUser = sessionData?.session?.user;
+        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+        if (sessionErr) throw sessionErr;
+
+        const sessionUser = sessionData?.session?.user || null;
 
         if (!sessionUser) {
           router.replace('/welcome-back?next=/challenges/menu');
@@ -55,83 +77,65 @@ export default function ChallengesMenuPage() {
         setUser(sessionUser);
 
         // Pro entitlement
-        const { data: entitlements } = await supabase
+        const { data: entitlements, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
           .limit(1);
 
-        if (!cancelled) setIsPro(!!entitlements?.length);
+        if (!cancelled) setIsPro(!entErr && !!entitlements?.length);
 
         // Challenge lookup: id -> slug
-        const { data: challenges } = await supabase
+        const { data: challenges, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug');
+
+        if (chErr) throw chErr;
 
         const challengeIdToSlug = {};
         (challenges || []).forEach((c) => {
           if (c?.id && c?.slug) challengeIdToSlug[c.id] = c.slug;
         });
 
-        // ✅ tolerate either uploads.challenge_id format:
-        // 1) UUID challenge id (map via challenges table)
-        // 2) already a slug (use directly)
-        const resolveSlug = (challengeId) => {
-          if (!challengeId) return null;
-
-          const mapped = challengeIdToSlug[challengeId];
-          if (mapped) return mapped;
-
-          // Treat as slug fallback (migration-safe)
-          if (typeof challengeId === 'string') return challengeId;
-
-          return null;
-        };
-
-        // Uploads (many rows per step; we need distinct step_numbers per slug)
-        const { data: uploads } = await supabase
+        // Uploads -> distinct step_numbers per slug
+        const { data: uploads, error: upErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
           .eq('user_id', sessionUser.id);
 
-        const portfolioStepsBySlug = {};
-        (uploads || []).forEach((row) => {
-          const slug = resolveSlug(row.challenge_id);
-          if (!slug) return;
+        if (upErr) throw upErr;
 
-          if (!portfolioStepsBySlug[slug]) {
-            portfolioStepsBySlug[slug] = new Set();
-          }
-          portfolioStepsBySlug[slug].add(row.step_number);
+        const stepsBySlug = {};
+        (uploads || []).forEach((row) => {
+          const slug = challengeIdToSlug[row.challenge_id];
+          if (!slug) return;
+          if (!stepsBySlug[slug]) stepsBySlug[slug] = new Set();
+          stepsBySlug[slug].add(row.step_number);
         });
 
-        const starterSteps = portfolioStepsBySlug['starter-style'] || new Set();
-        const hasAnyStarter = starterSteps.size > 0;
-        const starterComplete =
-          starterSteps.has(1) && starterSteps.has(2) && starterSteps.has(3) && starterSteps.has(4);
+        const starterStepsCount = stepsBySlug['starter-style']?.size || 0;
 
         const portfolioBySlug = {
-          'starter-style': starterComplete ? 'complete' : hasAnyStarter ? 'in-progress' : 'not-started',
+          'starter-style':
+            starterStepsCount >= 4
+              ? 'complete'
+              : starterStepsCount > 0
+                ? 'in-progress'
+                : 'not-started',
         };
 
-        // Submissions (certificate / approval)
-        const { data: submissions } = await supabase
+        // Submissions -> certificate status (schema-correct: submitted_at exists; created_at does not)
+        const { data: submissions, error: subErr } = await supabase
           .from('submissions')
-          .select('challenge_slug, status')
+          .select('challenge_slug, status, submitted_at, reviewed_at')
           .eq('user_id', sessionUser.id);
 
-        const starterSubmissions = (submissions || []).filter(
-          (s) => s?.challenge_slug === 'starter-style'
-        );
+        if (subErr) throw subErr;
 
-        const starterApproved = starterSubmissions.some(
-          (s) => (s.status || '').toLowerCase() === 'approved'
-        );
-        const starterHasAnySubmission = starterSubmissions.length > 0;
-
+        const starterRows = (submissions || []).filter((s) => s?.challenge_slug === 'starter-style');
         const certificateBySlug = {
-          'starter-style': starterApproved ? 'complete' : starterHasAnySubmission ? 'in-progress' : 'not-started',
+          'starter-style': getCertificateStateFromRows(starterRows),
         };
 
         if (!cancelled) {
@@ -139,7 +143,8 @@ export default function ChallengesMenuPage() {
           setCertificateStatus(certificateBySlug);
         }
       } catch (e) {
-        if (!cancelled) setError('Something went wrong loading your challenges.');
+        console.error('[menu] load error:', e);
+        if (!cancelled) setError('Something went wrong loading your collections.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -163,10 +168,10 @@ export default function ChallengesMenuPage() {
 
   const essentialsCompleted =
     portfolioStatus['starter-style'] === 'complete' &&
-    certificateStatus['starter-style'] === 'complete';
+    certificateStatus['starter-style'] === 'approved';
 
   const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
-  const starterCertState = certificateStatus['starter-style'] || 'not-started';
+  const starterCertState = certificateStatus['starter-style'] || 'not-submitted';
 
   return (
     <div style={pageShell}>
@@ -195,8 +200,8 @@ export default function ChallengesMenuPage() {
         <section style={intro}>
           <h1 style={title}>Style Challenge Collections</h1>
           <p style={introText}>
-            Complete challenges, build your portfolio, and submit your work for
-            review. Approved work earns a Patrick Cameron certificate.
+            Complete challenges, build your portfolio, and submit your work for review.
+            Approved work earns a Patrick Cameron certificate.
           </p>
         </section>
 
@@ -213,11 +218,10 @@ export default function ChallengesMenuPage() {
                 <div style={eyebrow}>Starter Challenge</div>
                 <div style={cardTitle}>Starter Style Challenge</div>
                 <p style={cardText}>
-                  The original free challenge that introduces the Style Challenge
-                  format.
+                  The original free challenge that introduces the Style Challenge format.
                 </p>
 
-                {/* ✅ Progress + certificate indicators */}
+                {/* Progress + certificate indicators */}
                 <div style={statusRow}>
                   <span
                     style={
@@ -238,29 +242,30 @@ export default function ChallengesMenuPage() {
 
                   <span
                     style={
-                      starterCertState === 'complete'
+                      starterCertState === 'approved'
                         ? statusPillComplete
-                        : starterCertState === 'in-progress'
+                        : starterCertState === 'in-review'
                           ? statusPillProgress
-                          : statusPillIdle
+                          : starterCertState === 'rejected'
+                            ? statusPillRejected
+                            : statusPillIdle
                     }
                     title="Certificate progress"
                   >
-                    {starterCertState === 'complete'
+                    {starterCertState === 'approved'
                       ? 'CERTIFICATE: APPROVED'
-                      : starterCertState === 'in-progress'
+                      : starterCertState === 'in-review'
                         ? 'CERTIFICATE: IN REVIEW'
-                        : 'CERTIFICATE: NOT SUBMITTED'}
+                        : starterCertState === 'rejected'
+                          ? 'CERTIFICATE: REJECTED'
+                          : 'CERTIFICATE: NOT SUBMITTED'}
                   </span>
                 </div>
               </div>
             </div>
 
             <div style={cardRight(isNarrow)}>
-              <Link
-                href="/challenges/starter-style/step1"
-                style={greenButton(isNarrow)}
-              >
+              <Link href="/challenges/starter-style/step1" style={greenButton(isNarrow)}>
                 Launch the challenge
               </Link>
             </div>
@@ -274,8 +279,7 @@ export default function ChallengesMenuPage() {
               <div style={eyebrow}>Collection One</div>
               <h2 style={collectionTitle}>Patrick Cameron Essentials</h2>
               <p style={collectionText}>
-                A focused set of core styles designed to make you faster, calmer,
-                and more profitable in the salon.
+                A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.
               </p>
             </div>
 
@@ -301,17 +305,13 @@ export default function ChallengesMenuPage() {
         {/* Party Styles */}
         <section style={comingSoon}>
           <h3 style={comingTitle}>Party Styles</h3>
-          <p style={comingText}>
-            A party-hair collection for time-pressed stylists. Coming soon.
-          </p>
+          <p style={comingText}>A party-hair collection for time-pressed stylists. Coming soon.</p>
         </section>
 
         {/* Bridal */}
         <section style={comingSoon}>
           <h3 style={comingTitle}>Essential Bridal</h3>
-          <p style={comingText}>
-            Bridal foundations and signature looks. Coming soon.
-          </p>
+          <p style={comingText}>Bridal foundations and signature looks. Coming soon.</p>
         </section>
 
         {error && <p style={errorText}>{error}</p>}
@@ -327,7 +327,7 @@ const pageShell = {
   background: '#000',
   display: 'flex',
   justifyContent: 'center',
-  overflowX: 'hidden', // ✅ prevents sideways scroll from any child overflow
+  overflowX: 'hidden',
 };
 
 const pageMain = (isNarrow) => ({
@@ -335,8 +335,7 @@ const pageMain = (isNarrow) => ({
   maxWidth: 960,
   padding: isNarrow ? '2.2rem 1rem 3rem' : '2.5rem 1.25rem 3rem',
   color: '#e5e7eb',
-  fontFamily:
-    'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+  fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
   boxSizing: 'border-box',
 });
 
@@ -354,7 +353,7 @@ const identityRow = (isNarrow) => ({
   justifyContent: 'center',
   gap: 10,
   marginBottom: 20,
-  flexWrap: 'wrap', // ✅ long emails won’t force overflow
+  flexWrap: 'wrap',
   padding: isNarrow ? '0 6px' : 0,
   boxSizing: 'border-box',
 });
@@ -398,7 +397,7 @@ const card = (isNarrow) => ({
   border: '1px solid #1e293b',
   padding: '1.1rem 1.3rem',
   display: 'flex',
-  flexDirection: isNarrow ? 'column' : 'row', // ✅ stack on mobile
+  flexDirection: isNarrow ? 'column' : 'row',
   justifyContent: 'space-between',
   alignItems: isNarrow ? 'stretch' : 'center',
   gap: isNarrow ? 14 : 20,
@@ -443,7 +442,7 @@ const greenButton = (isNarrow) => ({
   fontWeight: 700,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
-  width: isNarrow ? '100%' : 'auto', // ✅ full-width on mobile
+  width: isNarrow ? '100%' : 'auto',
   boxSizing: 'border-box',
 });
 
@@ -483,6 +482,13 @@ const statusPillIdle = {
   background: 'rgba(148,163,184,0.12)',
   color: '#94a3b8',
   borderColor: 'rgba(148,163,184,0.25)',
+};
+
+const statusPillRejected = {
+  ...statusPillBase,
+  background: 'rgba(248,113,113,0.14)',
+  color: '#f87171',
+  borderColor: 'rgba(248,113,113,0.35)',
 };
 
 const collectionCard = { marginBottom: 32 };

@@ -1,3 +1,4 @@
+// src/app/challenges/[slug]/portfolio/page.js
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -84,7 +85,7 @@ export default function ChallengePortfolioPage() {
 
       await Promise.all([
         loadProfile(u),
-        loadUploads(u, adminDemo).then((imgMap) => {
+        loadUploads(u, adminDemo, slug).then((imgMap) => {
           if (!cancelled) setImages(imgMap)
         }),
       ])
@@ -98,7 +99,7 @@ export default function ChallengePortfolioPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, adminDemo, demo, demoImages])
+  }, [router, adminDemo, demo, demoImages, slug])
 
   // ---------- helpers: profile + uploads ----------
 
@@ -120,52 +121,92 @@ export default function ChallengePortfolioPage() {
     setSalonName(profile.salon_name || '')
   }
 
-  const loadUploads = async (u, isAdminDemo) => {
+  const resolveChallengeIdBySlug = async (challengeSlug) => {
+    const { data, error: chErr } = await supabase
+      .from('challenges')
+      .select('id')
+      .eq('slug', challengeSlug)
+      .eq('is_active', true)
+      .single()
+
+    if (chErr) {
+      console.warn('Challenge lookup failed:', chErr.message)
+      return null
+    }
+
+    return data?.id || null
+  }
+
+  const loadUploads = async (u, isAdminDemo, challengeSlug) => {
     const imgMap = {}
 
     if (!u && !isAdminDemo) {
       return imgMap
     }
 
-    // DB rows first
-    if (u) {
-      const { data: rows, error: rowsError } = await supabase
-        .from('uploads')
-        .select('step_number, image_url, created_at')
-        .eq('user_id', u.id)
-        .in('step_number', [1, 2, 3, 4])
-        .order('created_at', { ascending: false })
+    // We only support real uploads when we have a real user session
+    if (!u) {
+      return imgMap
+    }
 
-      if (rowsError) {
-        console.warn('Uploads load error:', rowsError.message)
-      } else if (rows && rows.length > 0) {
-        const latest = {}
-        for (const r of rows) {
-          if (!latest[r.step_number]) {
-            const url = r.image_url?.startsWith('http')
-              ? r.image_url
-              : STORAGE_PREFIX + r.image_url
-            latest[r.step_number] = url
-          }
+    // ✅ Key fix: filter uploads to THIS challenge (by UUID challenge_id)
+    const challengeId = await resolveChallengeIdBySlug(challengeSlug)
+    if (!challengeId) {
+      // If we can’t resolve, fail gracefully rather than showing wrong images
+      console.warn('No active challenge found for slug:', challengeSlug)
+      return imgMap
+    }
+
+    // DB rows first (latest per step within this challenge)
+    const { data: rows, error: rowsError } = await supabase
+      .from('uploads')
+      .select('step_number, image_url, created_at')
+      .eq('user_id', u.id)
+      .eq('challenge_id', challengeId)
+      .in('step_number', [1, 2, 3, 4])
+      .order('created_at', { ascending: false })
+
+    if (rowsError) {
+      console.warn('Uploads load error:', rowsError.message)
+    } else if (rows && rows.length > 0) {
+      const latest = {}
+      for (const r of rows) {
+        if (!latest[r.step_number]) {
+          const url = r.image_url?.startsWith('http')
+            ? r.image_url
+            : STORAGE_PREFIX + r.image_url
+          latest[r.step_number] = url
         }
-        Object.assign(imgMap, latest)
       }
+      Object.assign(imgMap, latest)
     }
 
     // Fallback for finished look: read directly from storage if needed
+    // NOTE: your image_url shows files stored under `${user_id}/finished-mannequin-...`,
+    // so list the user root folder (not `${user_id}/finished-mannequin/`).
     if (!imgMap[4] && u) {
       try {
-        const folder = `${u.id}/finished-mannequin`
+        const folder = `${u.id}`
         const { data: files, error: listError } = await supabase.storage
           .from('uploads')
-          .list(folder, { limit: 50 })
+          .list(folder, { limit: 200 })
 
         if (listError) {
           console.warn('Storage list error (finished):', listError.message)
         } else if (files && files.length > 0) {
-          const latestFile = files[files.length - 1]
-          const path = `${folder}/${latestFile.name}`
-          imgMap[4] = STORAGE_PREFIX + path
+          const finishedFiles = files
+            .filter((f) => f?.name && f.name.startsWith('finished'))
+            .sort((a, b) => {
+              const at = new Date(a?.updated_at || a?.created_at || 0).getTime()
+              const bt = new Date(b?.updated_at || b?.created_at || 0).getTime()
+              return at - bt
+            })
+
+          const latestFile = finishedFiles[finishedFiles.length - 1]
+          if (latestFile?.name) {
+            const path = `${folder}/${latestFile.name}`
+            imgMap[4] = STORAGE_PREFIX + path
+          }
         }
       } catch (err) {
         console.warn('Finished storage fallback error:', err)
@@ -262,7 +303,7 @@ export default function ChallengePortfolioPage() {
           challengeTitle,
           stylistName: fullName || (demo ? 'SAMPLE STYLIST' : ''),
           salonName: (salonName || '').trim() || (demo ? 'SAMPLE SALON' : ''),
-          demo: demo, // harmless if ignored; useful if you add watermarking in the route
+          demo: demo,
         }),
       })
 

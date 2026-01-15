@@ -1,8 +1,9 @@
+// src/app/page.js
 'use client'
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
-import { supabase } from '@/lib/supabaseClient' // If your @ alias isn't set, use: '../lib/supabaseClient'
+import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 
 export default function HomePage() {
@@ -18,13 +19,13 @@ export default function HomePage() {
     let active = true
     setMounted(true)
 
-    // Check existing session and send logged-in users to /challenge
+    // If already logged in, send to Pro menu
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return
       const sessionUser = data.session?.user
       if (sessionUser) {
         setUser(sessionUser)
-        router.push('/challenge')
+        router.push('/challenges/menu')
       }
     })
 
@@ -47,13 +48,27 @@ export default function HomePage() {
     setMessage('Preparing your magic link...')
 
     try {
+      // Store Pro intent as a fallback for callback routing
+      try {
+        localStorage.setItem('pc_next', '/challenges/menu')
+      } catch {}
+
       // Clear any stale session before sending a fresh link
       await supabase.auth.signOut().catch(() => {})
+
+      const baseOrigin =
+        (process.env.NEXT_PUBLIC_SITE_URL || '').trim() ||
+        (typeof window !== 'undefined' ? window.location.origin : '')
+
+      // Make Pro routing explicit in the callback URL
+      const callbackUrl = new URL('/auth/callback', baseOrigin)
+      callbackUrl.searchParams.set('next', '/challenges/menu')
+      callbackUrl.searchParams.set('flow', 'pro')
 
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: callbackUrl.toString(),
         },
       })
 
@@ -137,7 +152,6 @@ export default function HomePage() {
         />
       </div>
 
-      {/* Headline & copy */}
       <h1 style={{ fontSize: '1.8rem', fontWeight: 600, marginBottom: '0.75rem' }}>
         Welcome to the Style Challenge
       </h1>
@@ -147,7 +161,6 @@ export default function HomePage() {
         Magic links are single-use for your security.
       </p>
 
-      {/* Login form */}
       {!user ? (
         <form
           onSubmit={handleMagicLink}
@@ -206,7 +219,6 @@ export default function HomePage() {
         </p>
       )}
 
-      {/* Status message */}
       {message && (
         <p style={{ fontSize: '0.95rem', color: '#ccc', marginTop: '1rem', maxWidth: 420 }}>
           {message}
