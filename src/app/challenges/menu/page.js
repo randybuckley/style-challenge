@@ -50,11 +50,8 @@ export default function ChallengesMenuPage() {
 
       const statuses = rows.map((r) => normalizeStatus(r.status));
 
-      // Order of precedence:
       if (statuses.includes('approved')) return 'approved';
       if (statuses.includes('rejected')) return 'rejected';
-
-      // Anything else that exists means "in review" (submitted/pending/in_review/etc)
       return 'in-review';
     };
 
@@ -86,16 +83,29 @@ export default function ChallengesMenuPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entitlements?.length);
 
-        // Challenge lookup: id -> slug
+        // Load ONLY the challenges we care about for menu state:
+        // starter-style + essentials-* (we use these to compute the Essentials badge).
         const { data: challenges, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug');
+          .select('id, slug, steps, sort_order')
+          .or('slug.eq.starter-style,slug.like.essentials-%')
+          .order('sort_order', { ascending: true });
 
         if (chErr) throw chErr;
 
         const challengeIdToSlug = {};
+        const requiredStepsBySlug = {};
+        const essentialsSlugs = [];
+
         (challenges || []).forEach((c) => {
-          if (c?.id && c?.slug) challengeIdToSlug[c.id] = c.slug;
+          if (!c?.id || !c?.slug) return;
+          challengeIdToSlug[c.id] = c.slug;
+
+          // steps is JSON/array in your schema; fall back to 4 if missing
+          const required = Array.isArray(c.steps) ? c.steps.length : 4;
+          requiredStepsBySlug[c.slug] = required;
+
+          if (c.slug.startsWith('essentials-')) essentialsSlugs.push(c.slug);
         });
 
         // Uploads -> distinct step_numbers per slug
@@ -114,18 +124,30 @@ export default function ChallengesMenuPage() {
           stepsBySlug[slug].add(row.step_number);
         });
 
-        const starterStepsCount = stepsBySlug['starter-style']?.size || 0;
+        const portfolioBySlug = {};
 
-        const portfolioBySlug = {
-          'starter-style':
-            starterStepsCount >= 4
-              ? 'complete'
-              : starterStepsCount > 0
-                ? 'in-progress'
-                : 'not-started',
-        };
+        // Starter status (still shown on Menu)
+        const starterSlug = 'starter-style';
+        const starterCount = stepsBySlug[starterSlug]?.size || 0;
+        const starterRequired = requiredStepsBySlug[starterSlug] ?? 4;
 
-        // Submissions -> certificate status (schema-correct: submitted_at exists; created_at does not)
+        portfolioBySlug[starterSlug] =
+          starterCount >= starterRequired
+            ? 'complete'
+            : starterCount > 0
+              ? 'in-progress'
+              : 'not-started';
+
+        // Essentials statuses (used for badge)
+        essentialsSlugs.forEach((slug) => {
+          const count = stepsBySlug[slug]?.size || 0;
+          const required = requiredStepsBySlug[slug] ?? 4;
+
+          portfolioBySlug[slug] =
+            count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
+        });
+
+        // Submissions -> certificate status
         const { data: submissions, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_slug, status, submitted_at, reviewed_at')
@@ -133,10 +155,20 @@ export default function ChallengesMenuPage() {
 
         if (subErr) throw subErr;
 
-        const starterRows = (submissions || []).filter((s) => s?.challenge_slug === 'starter-style');
-        const certificateBySlug = {
-          'starter-style': getCertificateStateFromRows(starterRows),
-        };
+        const rowsBySlug = {};
+        (submissions || []).forEach((s) => {
+          const slug = s?.challenge_slug;
+          if (!slug) return;
+          if (!rowsBySlug[slug]) rowsBySlug[slug] = [];
+          rowsBySlug[slug].push(s);
+        });
+
+        const certificateBySlug = {};
+        certificateBySlug[starterSlug] = getCertificateStateFromRows(rowsBySlug[starterSlug] || []);
+
+        essentialsSlugs.forEach((slug) => {
+          certificateBySlug[slug] = getCertificateStateFromRows(rowsBySlug[slug] || []);
+        });
 
         if (!cancelled) {
           setPortfolioStatus(portfolioBySlug);
@@ -166,9 +198,14 @@ export default function ChallengesMenuPage() {
 
   if (!user) return null;
 
+  // Essentials badge logic (NOW based on essentials-* challenges, not starter)
+  const essentialsSlugs = Object.keys(portfolioStatus).filter((s) => s.startsWith('essentials-'));
+
   const essentialsCompleted =
-    portfolioStatus['starter-style'] === 'complete' &&
-    certificateStatus['starter-style'] === 'approved';
+    essentialsSlugs.length > 0 &&
+    essentialsSlugs.every(
+      (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
+    );
 
   const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
   const starterCertState = certificateStatus['starter-style'] || 'not-submitted';

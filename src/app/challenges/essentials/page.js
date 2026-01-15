@@ -1,7 +1,7 @@
 // src/app/challenges/essentials/page.js
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -17,38 +17,49 @@ export default function EssentialsCollectionPage() {
 
   const [isPro, setIsPro] = useState(false);
 
+  // Loaded from DB
+  const [essentialsChallenges, setEssentialsChallenges] = useState([]); // [{ id, slug, steps, sort_order }]
+
   // portfolio: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
   // certificate: 'not-submitted' | 'in-review' | 'approved' | 'rejected'
   const [certificateStatus, setCertificateStatus] = useState({});
 
-  const styles = Array.from({ length: 10 }).map((_, i) => {
-    const n = i + 1;
-    const slug = n === 1 ? 'starter-style' : `essentials-${n}`;
-    return {
-      number: n,
-      slug,
-      title: `Essentials Style ${n}`,
-      isLive: n === 1,
-      thumbSrc: '/style_one/finished_reference.jpeg',
-      launchHref: n === 1 ? '/challenges/starter-style/step1' : null,
-    };
-  });
+  const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
+
+  const getCertificateStateFromRows = (rows) => {
+    if (!rows || rows.length === 0) return 'not-submitted';
+
+    const statuses = rows.map((r) => normalizeStatus(r.status));
+    if (statuses.includes('approved')) return 'approved';
+    if (statuses.includes('rejected')) return 'rejected';
+    return 'in-review';
+  };
+
+  const prettifySlug = (slug) => {
+    // essentials-classic-chignon -> Classic Chignon
+    const raw = (slug || '').replace(/^essentials-/, '');
+    return raw
+      .split('-')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+  };
+
+  const styles = useMemo(() => {
+    return (essentialsChallenges || []).map((c, idx) => ({
+      number: idx + 1,
+      slug: c.slug,
+      title: prettifySlug(c.slug),
+      isLive: true,
+      thumbSrc: '/style_one/finished_reference.jpeg', // keep your existing asset for now
+      launchHref: `/challenges/${c.slug}/step1`,
+      requiredSteps: Array.isArray(c.steps) ? c.steps.length : 4,
+    }));
+  }, [essentialsChallenges]);
 
   useEffect(() => {
     let cancelled = false;
-
-    const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
-
-    const getCertificateStateFromRows = (rows) => {
-      if (!rows || rows.length === 0) return 'not-submitted';
-
-      const statuses = rows.map((r) => normalizeStatus(r.status));
-
-      if (statuses.includes('approved')) return 'approved';
-      if (statuses.includes('rejected')) return 'rejected';
-      return 'in-review';
-    };
 
     const load = async () => {
       setLoading(true);
@@ -78,18 +89,27 @@ export default function EssentialsCollectionPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
-        // 3) Portfolio status from uploads + challenges map
-        const { data: challengeRows, error: chErr } = await supabase
+        // 3) Load Essentials challenges from DB (schema confirmed by your SQL: slug, steps, sort_order)
+        const { data: chRows, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug');
+          .select('id, slug, steps, sort_order')
+          .like('slug', 'essentials-%')
+          .order('sort_order', { ascending: true });
 
         if (chErr) throw chErr;
 
-        const idToSlug = new Map();
-        for (const c of challengeRows || []) {
-          if (c?.id && c?.slug) idToSlug.set(c.id, c.slug);
-        }
+        const essentials = (chRows || []).filter((c) => c?.id && c?.slug);
+        if (!cancelled) setEssentialsChallenges(essentials);
 
+        // Build id->slug and required steps maps for portfolio computation
+        const idToSlug = new Map();
+        const requiredBySlug = {};
+        essentials.forEach((c) => {
+          idToSlug.set(c.id, c.slug);
+          requiredBySlug[c.slug] = Array.isArray(c.steps) ? c.steps.length : 4;
+        });
+
+        // 4) Portfolio status from uploads
         const { data: uploadRows, error: uploadErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
@@ -100,22 +120,24 @@ export default function EssentialsCollectionPage() {
         const stepsBySlug = new Map();
         for (const row of uploadRows || []) {
           const slug = idToSlug.get(row.challenge_id);
-          if (!slug) continue;
+          if (!slug) continue; // ignore non-essentials uploads
           if (!stepsBySlug.has(slug)) stepsBySlug.set(slug, new Set());
           stepsBySlug.get(slug).add(row.step_number);
         }
 
         const portfolioBySlug = {};
-        for (const s of styles) {
-          const set = stepsBySlug.get(s.slug);
-          const count = set?.size || 0;
-          portfolioBySlug[s.slug] =
-            count >= 4 ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
-        }
+        essentials.forEach((c) => {
+          const slug = c.slug;
+          const count = stepsBySlug.get(slug)?.size || 0;
+          const required = requiredBySlug[slug] ?? 4;
+
+          portfolioBySlug[slug] =
+            count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
+        });
 
         if (!cancelled) setPortfolioStatus(portfolioBySlug);
 
-        // 4) Certificate status from submissions (schema-correct)
+        // 5) Certificate status from submissions
         const { data: submissionRows, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_slug, status, submitted_at, reviewed_at')
@@ -132,9 +154,9 @@ export default function EssentialsCollectionPage() {
         }
 
         const certBySlug = {};
-        for (const s of styles) {
-          certBySlug[s.slug] = getCertificateStateFromRows(rowsBySlug.get(s.slug) || []);
-        }
+        essentials.forEach((c) => {
+          certBySlug[c.slug] = getCertificateStateFromRows(rowsBySlug.get(c.slug) || []);
+        });
 
         if (!cancelled) setCertificateStatus(certBySlug);
       } catch (e) {
@@ -290,20 +312,14 @@ export default function EssentialsCollectionPage() {
                     </div>
 
                     <div style={{ marginTop: 10 }}>
-                      {s.isLive ? (
-                        launchBlocked ? (
-                          <Link href="/challenges/redeem" style={lockedCta}>
-                            Locked — redeem code
-                          </Link>
-                        ) : (
-                          <Link href={s.launchHref} style={launchCta}>
-                            Launch the challenge
-                          </Link>
-                        )
+                      {launchBlocked ? (
+                        <Link href="/challenges/redeem" style={lockedCta}>
+                          Locked — redeem code
+                        </Link>
                       ) : (
-                        <button type="button" disabled style={comingSoonBtn}>
-                          Coming soon
-                        </button>
+                        <Link href={s.launchHref} style={launchCta}>
+                          Launch the challenge
+                        </Link>
                       )}
                     </div>
                   </div>
@@ -509,18 +525,6 @@ const lockedCta = {
   fontSize: '0.82rem',
   fontWeight: 800,
   textDecoration: 'none',
-  whiteSpace: 'nowrap',
-};
-
-const comingSoonBtn = {
-  padding: '0.55rem 1.05rem',
-  borderRadius: 999,
-  border: '1px dashed #4b5563',
-  backgroundColor: '#020617',
-  color: '#9ca3af',
-  fontSize: '0.82rem',
-  fontWeight: 700,
-  cursor: 'not-allowed',
   whiteSpace: 'nowrap',
 };
 
