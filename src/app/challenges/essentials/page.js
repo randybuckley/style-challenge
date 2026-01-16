@@ -18,7 +18,7 @@ export default function EssentialsCollectionPage() {
   const [isPro, setIsPro] = useState(false);
 
   // Loaded from DB
-  const [essentialsChallenges, setEssentialsChallenges] = useState([]); // [{ id, slug, steps, sort_order }]
+  const [essentialsChallenges, setEssentialsChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url }]
 
   // portfolio: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
@@ -52,7 +52,8 @@ export default function EssentialsCollectionPage() {
       slug: c.slug,
       title: prettifySlug(c.slug),
       isLive: true,
-      thumbSrc: '/style_one/finished_reference.jpeg', // keep your existing asset for now
+      // ✅ Use DB-provided thumbnail when present; fallback to existing asset
+      thumbSrc: c.thumbnail_url || '/style_one/finished_reference.jpeg',
       launchHref: `/challenges/${c.slug}/step1`,
       requiredSteps: Array.isArray(c.steps) ? c.steps.length : 4,
     }));
@@ -89,10 +90,10 @@ export default function EssentialsCollectionPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
-        // 3) Load Essentials challenges from DB (schema confirmed by your SQL: slug, steps, sort_order)
+        // 3) Load Essentials challenges from DB (include thumbnail_url)
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug, steps, sort_order')
+          .select('id, slug, steps, sort_order, thumbnail_url')
           .like('slug', 'essentials-%')
           .order('sort_order', { ascending: true });
 
