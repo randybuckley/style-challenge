@@ -1,7 +1,7 @@
 // src/app/challenges/menu/page.js
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -13,6 +13,7 @@ export default function ChallengesMenuPage() {
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const [isPro, setIsPro] = useState(false);
@@ -23,6 +24,34 @@ export default function ChallengesMenuPage() {
   const [certificateStatus, setCertificateStatus] = useState({});
 
   const [isNarrow, setIsNarrow] = useState(false);
+
+  // Collections from DB (public.collections)
+  const [collections, setCollections] = useState([]);
+
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const FALLBACK_PLACEHOLDER =
+    (SUPABASE_URL ? `${SUPABASE_URL}` : '') +
+    '/storage/v1/object/public/assets/collections/placeholder.jpeg';
+
+  const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
+
+  const resolvePublicUrl = (maybeUrl) => {
+    if (!maybeUrl) return '';
+    const u = maybeUrl.toString().trim();
+    if (!u) return '';
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+    if (u.startsWith('/storage/')) return (SUPABASE_URL || '') + u;
+    return u;
+  };
+
+  const getCertificateStateFromRows = (rows) => {
+    if (!rows || rows.length === 0) return 'not-submitted';
+
+    const statuses = rows.map((r) => normalizeStatus(r.status));
+    if (statuses.includes('approved')) return 'approved';
+    if (statuses.includes('rejected')) return 'rejected';
+    return 'in-review';
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -43,33 +72,21 @@ export default function ChallengesMenuPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
-
-    const getCertificateStateFromRows = (rows) => {
-      if (!rows || rows.length === 0) return 'not-submitted';
-
-      const statuses = rows.map((r) => normalizeStatus(r.status));
-
-      if (statuses.includes('approved')) return 'approved';
-      if (statuses.includes('rejected')) return 'rejected';
-      return 'in-review';
-    };
-
     const load = async () => {
       setLoading(true);
+      setCollectionsLoading(true);
       setError(null);
 
       try {
+        // Session
         const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) throw sessionErr;
 
         const sessionUser = sessionData?.session?.user || null;
-
         if (!sessionUser) {
           router.replace('/welcome-back?next=/challenges/menu');
           return;
         }
-
         if (cancelled) return;
         setUser(sessionUser);
 
@@ -83,8 +100,34 @@ export default function ChallengesMenuPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entitlements?.length);
 
-        // Load ONLY the challenges we care about for menu state:
-        // starter-style + essentials-* (we use these to compute the Essentials badge).
+        // ------------------------------------------------------------
+        // Load collections for menu cards (DB-driven; no redeploy needed)
+        // status is constrained to: 'live' | 'coming-soon' | 'hidden'
+        // ------------------------------------------------------------
+        const { data: dbCollections, error: colErr } = await supabase
+          .from('collections')
+          .select(
+            'id, slug, title, description, hero_image_url, placeholder_image_url, launch_path, sort_order, is_active, is_coming_soon, status'
+          )
+          .eq('is_active', true)
+          .not('status', 'eq', 'hidden')
+          .order('sort_order', { ascending: true });
+
+        if (!colErr && Array.isArray(dbCollections)) {
+          if (!cancelled) setCollections(dbCollections);
+        } else if (colErr) {
+          // Don’t fail the whole page; we can still show Starter + fallbacks.
+          console.warn('[menu] collections load error:', colErr);
+          if (!cancelled) setCollections([]);
+        }
+
+        if (!cancelled) setCollectionsLoading(false);
+
+        // ------------------------------------------------------------
+        // Progress + certificate only needed for:
+        // - starter-style challenge card
+        // - essentials badge (computed from essentials-* challenges)
+        // ------------------------------------------------------------
         const { data: challenges, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, steps, sort_order')
@@ -101,14 +144,12 @@ export default function ChallengesMenuPage() {
           if (!c?.id || !c?.slug) return;
           challengeIdToSlug[c.id] = c.slug;
 
-          // steps is JSON/array in your schema; fall back to 4 if missing
           const required = Array.isArray(c.steps) ? c.steps.length : 4;
           requiredStepsBySlug[c.slug] = required;
 
           if (c.slug.startsWith('essentials-')) essentialsSlugs.push(c.slug);
         });
 
-        // Uploads -> distinct step_numbers per slug
         const { data: uploads, error: upErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
@@ -126,7 +167,7 @@ export default function ChallengesMenuPage() {
 
         const portfolioBySlug = {};
 
-        // Starter status (still shown on Menu)
+        // Starter status
         const starterSlug = 'starter-style';
         const starterCount = stepsBySlug[starterSlug]?.size || 0;
         const starterRequired = requiredStepsBySlug[starterSlug] ?? 4;
@@ -138,7 +179,7 @@ export default function ChallengesMenuPage() {
               ? 'in-progress'
               : 'not-started';
 
-        // Essentials statuses (used for badge)
+        // Essentials status (for badge)
         essentialsSlugs.forEach((slug) => {
           const count = stepsBySlug[slug]?.size || 0;
           const required = requiredStepsBySlug[slug] ?? 4;
@@ -147,7 +188,6 @@ export default function ChallengesMenuPage() {
             count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
         });
 
-        // Submissions -> certificate status
         const { data: submissions, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_slug, status, submitted_at, reviewed_at')
@@ -188,6 +228,69 @@ export default function ChallengesMenuPage() {
     };
   }, [router]);
 
+  const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
+  const starterCertState = certificateStatus['starter-style'] || 'not-submitted';
+
+  // Essentials badge logic (based on essentials-* challenges)
+  const essentialsSlugs = useMemo(
+    () => Object.keys(portfolioStatus).filter((s) => s.startsWith('essentials-')),
+    [portfolioStatus]
+  );
+
+  const essentialsCompleted =
+    essentialsSlugs.length > 0 &&
+    essentialsSlugs.every(
+      (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
+    );
+
+  // If collections table empty or failing, render sensible fallbacks
+  const menuCollections = useMemo(() => {
+    if (Array.isArray(collections) && collections.length > 0) return collections;
+
+    // Fallback set (keeps menu looking complete even before DB rows exist)
+    return [
+      {
+        slug: 'essentials',
+        title: 'Patrick Cameron Essentials',
+        description:
+          'A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.',
+        hero_image_url:
+          (SUPABASE_URL ? `${SUPABASE_URL}` : '') +
+          '/storage/v1/object/public/assets/collections/essentials_hero.jpeg',
+        placeholder_image_url: FALLBACK_PLACEHOLDER,
+        launch_path: '/challenges/essentials',
+        sort_order: 10,
+        is_active: true,
+        is_coming_soon: false,
+        status: 'live',
+      },
+      {
+        slug: 'party-styles',
+        title: 'Party Styles',
+        description: 'A party-hair collection for time-pressed stylists.',
+        hero_image_url: '',
+        placeholder_image_url: FALLBACK_PLACEHOLDER,
+        launch_path: '',
+        sort_order: 20,
+        is_active: true,
+        is_coming_soon: true,
+        status: 'coming-soon',
+      },
+      {
+        slug: 'essential-bridal',
+        title: 'Essential Bridal',
+        description: 'Bridal foundations and signature looks.',
+        hero_image_url: '',
+        placeholder_image_url: FALLBACK_PLACEHOLDER,
+        launch_path: '',
+        sort_order: 30,
+        is_active: true,
+        is_coming_soon: true,
+        status: 'coming-soon',
+      },
+    ];
+  }, [collections, SUPABASE_URL]);
+
   if (loading) {
     return (
       <main style={loadingShell}>
@@ -197,18 +300,6 @@ export default function ChallengesMenuPage() {
   }
 
   if (!user) return null;
-
-  // Essentials badge logic (NOW based on essentials-* challenges, not starter)
-  const essentialsSlugs = Object.keys(portfolioStatus).filter((s) => s.startsWith('essentials-'));
-
-  const essentialsCompleted =
-    essentialsSlugs.length > 0 &&
-    essentialsSlugs.every(
-      (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
-    );
-
-  const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
-  const starterCertState = certificateStatus['starter-style'] || 'not-submitted';
 
   return (
     <div style={pageShell}>
@@ -228,29 +319,25 @@ export default function ChallengesMenuPage() {
         {/* Signed-in strip */}
         <div style={identityRow(isNarrow)}>
           <SignedInAs style={identityPill} />
-          <span style={isPro ? proBadge : lockedBadge}>
-            {isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}
-          </span>
+          <span style={isPro ? proBadge : lockedBadge}>{isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}</span>
         </div>
 
-        {/* Intro */}
+        {/* Welcome (first person, Patrick) */}
         <section style={intro}>
-          <h1 style={title}>Style Challenge Collections</h1>
+          <h1 style={title}>Welcome</h1>
           <p style={introText}>
-            Complete challenges, build your portfolio, and submit your work for review.
-            Approved work earns a Patrick Cameron certificate.
+            I’m glad you’re here. This is where you choose your learning pathway.
+            <br />
+            If you’re new, start with <strong>Essentials</strong> first — it’s the core foundation before you move on
+            to party or bridal work.
           </p>
         </section>
 
-        {/* Starter Challenge */}
+        {/* Starter Challenge (separate card) */}
         <section style={cardSection}>
           <div style={card(isNarrow)}>
             <div style={cardLeft}>
-              <img
-                src="/style_one/finished_reference.jpeg"
-                alt="Starter Style Challenge"
-                style={thumb}
-              />
+              <img src="/style_one/finished_reference.jpeg" alt="Starter Style Challenge" style={thumb} />
               <div style={{ minWidth: 0 }}>
                 <div style={eyebrow}>Starter Challenge</div>
                 <div style={cardTitle}>Starter Style Challenge</div>
@@ -258,7 +345,6 @@ export default function ChallengesMenuPage() {
                   The original free challenge that introduces the Style Challenge format.
                 </p>
 
-                {/* Progress + certificate indicators */}
                 <div style={statusRow}>
                   <span
                     style={
@@ -309,46 +395,80 @@ export default function ChallengesMenuPage() {
           </div>
         </section>
 
-        {/* Essentials Collection */}
-        <section style={collectionCard}>
-          <div style={collectionInner}>
-            <div style={collectionHeader}>
-              <div style={eyebrow}>Collection One</div>
-              <h2 style={collectionTitle}>Patrick Cameron Essentials</h2>
-              <p style={collectionText}>
-                A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.
-              </p>
-            </div>
-
-            <div style={collectionBody}>
-              <div style={heroWrap}>
-                <img
-                  src="/collections/essentials-hero.jpeg"
-                  alt="Patrick Cameron Essentials"
-                  style={heroImg}
-                />
-                <span style={essentialsCompleted ? completedBadge : progressBadge}>
-                  {essentialsCompleted ? 'COMPLETED' : 'IN PROGRESS'}
-                </span>
-              </div>
-
-              <Link href="/challenges/essentials" style={greenButton(isNarrow)}>
-                Launch the collection
-              </Link>
-            </div>
+        {/* Collections (DB-driven) */}
+        <section style={collectionsSection}>
+          <div style={collectionsHeader}>
+            <h2 style={collectionsTitle}>Collections</h2>
+            <p style={collectionsText}>
+              Choose a collection below. Essentials is the best place to start.
+            </p>
           </div>
-        </section>
 
-        {/* Party Styles */}
-        <section style={comingSoon}>
-          <h3 style={comingTitle}>Party Styles</h3>
-          <p style={comingText}>A party-hair collection for time-pressed stylists. Coming soon.</p>
-        </section>
+          <div style={collectionsGrid(isNarrow)}>
+            {menuCollections.map((c) => {
+              const status = normalizeStatus(c.status);
+              const isComingSoon = status === 'coming-soon' || !!c.is_coming_soon;
+              const isLive = status === 'live' && !isComingSoon;
 
-        {/* Bridal */}
-        <section style={comingSoon}>
-          <h3 style={comingTitle}>Essential Bridal</h3>
-          <p style={comingText}>Bridal foundations and signature looks. Coming soon.</p>
+              const heroUrl =
+                resolvePublicUrl(c.hero_image_url) ||
+                resolvePublicUrl(c.placeholder_image_url) ||
+                FALLBACK_PLACEHOLDER;
+
+              const isEssentials = c.slug === 'essentials';
+
+              const badgeText = isComingSoon
+                ? 'COMING SOON'
+                : isEssentials
+                  ? essentialsCompleted
+                    ? 'COMPLETED'
+                    : 'IN PROGRESS'
+                  : 'LIVE';
+
+              const badgeStyle = isComingSoon
+                ? comingSoonBadge
+                : isEssentials
+                  ? essentialsCompleted
+                    ? completedBadge
+                    : progressBadge
+                  : liveBadge;
+
+              const canLaunch = isLive && !!c.launch_path;
+
+              return (
+                <div key={c.id || c.slug} style={collectionCard}>
+                  <div style={collectionInner}>
+                    <div style={collectionHeaderBlock}>
+                      <div style={eyebrow}>Collection</div>
+                      <h3 style={collectionTitle}>{c.title || 'Untitled Collection'}</h3>
+                      <p style={collectionDesc}>{c.description || ''}</p>
+                    </div>
+
+                    <div style={collectionBody}>
+                      <div style={heroWrap}>
+                        <img src={heroUrl} alt={c.title || 'Collection hero'} style={heroImg} />
+                        <span style={badgeStyle}>{badgeText}</span>
+                      </div>
+
+                      {canLaunch ? (
+                        <Link href={c.launch_path} style={greenButton(isNarrow)}>
+                          Launch the collection
+                        </Link>
+                      ) : (
+                        <div style={disabledButton(isNarrow)}>Coming soon</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {collectionsLoading && (
+            <p style={{ textAlign: 'center', color: '#94a3b8', marginTop: 12 }}>
+              Loading collections…
+            </p>
+          )}
         </section>
 
         {error && <p style={errorText}>{error}</p>}
@@ -422,11 +542,11 @@ const lockedBadge = {
   color: '#facc15',
 };
 
-const intro = { textAlign: 'center', marginBottom: 28 };
+const intro = { textAlign: 'center', marginBottom: 26 };
 const title = { fontSize: '2rem', marginBottom: 8 };
-const introText = { fontSize: '0.95rem', color: '#cbd5f5' };
+const introText = { fontSize: '0.95rem', color: '#cbd5f5', lineHeight: 1.55 };
 
-const cardSection = { marginBottom: 30 };
+const cardSection = { marginBottom: 28 };
 
 const card = (isNarrow) => ({
   borderRadius: 16,
@@ -456,6 +576,8 @@ const thumb = {
   borderRadius: 12,
   objectFit: 'contain',
   flexShrink: 0,
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.08)',
 };
 
 const eyebrow = {
@@ -476,9 +598,23 @@ const greenButton = (isNarrow) => ({
   borderRadius: 999,
   background: 'linear-gradient(135deg, #22c55e, #16a34a)',
   color: '#0b1120',
-  fontWeight: 700,
+  fontWeight: 800,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
+  width: isNarrow ? '100%' : 'auto',
+  boxSizing: 'border-box',
+});
+
+const disabledButton = (isNarrow) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0.6rem 1.4rem',
+  borderRadius: 999,
+  background: 'rgba(148,163,184,0.12)',
+  color: '#94a3b8',
+  fontWeight: 800,
+  border: '1px solid rgba(148,163,184,0.25)',
   width: isNarrow ? '100%' : 'auto',
   boxSizing: 'border-box',
 });
@@ -528,64 +664,94 @@ const statusPillRejected = {
   borderColor: 'rgba(248,113,113,0.35)',
 };
 
-const collectionCard = { marginBottom: 32 };
+const collectionsSection = { marginTop: 10 };
+const collectionsHeader = { textAlign: 'center', marginBottom: 14 };
+const collectionsTitle = { fontSize: '1.35rem', marginBottom: 6 };
+const collectionsText = { fontSize: '0.9rem', color: '#cbd5f5', margin: 0 };
+
+const collectionsGrid = (isNarrow) => ({
+  display: 'grid',
+  gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr',
+  gap: 14,
+});
+
+const collectionCard = {
+  marginBottom: 0,
+};
+
 const collectionInner = {
   borderRadius: 16,
   background: '#020617',
   border: '1px solid #1f2937',
-  padding: '1.6rem',
+  padding: '1.4rem',
+  height: '100%',
+  boxSizing: 'border-box',
 };
 
-const collectionHeader = { textAlign: 'center', marginBottom: 16 };
-const collectionTitle = { fontSize: '1.2rem', marginBottom: 6 };
-const collectionText = { fontSize: '0.9rem', color: '#e5e7eb' };
+const collectionHeaderBlock = { textAlign: 'center', marginBottom: 14 };
+
+const collectionTitle = { fontSize: '1.1rem', margin: '6px 0 6px' };
+const collectionDesc = { fontSize: '0.9rem', color: '#e5e7eb', margin: 0, lineHeight: 1.45 };
 
 const collectionBody = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  gap: 14,
+  gap: 12,
 };
 
 const heroWrap = {
   position: 'relative',
-  width: 220,
+  width: 240,
+  maxWidth: '100%',
 };
 
 const heroImg = {
   width: '100%',
   borderRadius: 14,
   display: 'block',
+  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(255,255,255,0.03)',
 };
 
-const completedBadge = {
+const baseBadge = {
   position: 'absolute',
   bottom: 8,
   left: 8,
-  background: '#22c55e',
-  color: '#0b1120',
   padding: '0.25rem 0.6rem',
   borderRadius: 999,
   fontSize: '0.7rem',
-  fontWeight: 800,
+  fontWeight: 900,
+  letterSpacing: '0.03em',
+};
+
+const completedBadge = {
+  ...baseBadge,
+  background: '#22c55e',
+  color: '#0b1120',
 };
 
 const progressBadge = {
-  ...completedBadge,
+  ...baseBadge,
   background: '#facc15',
+  color: '#0b1120',
 };
 
-const comingSoon = {
-  textAlign: 'center',
-  opacity: 0.75,
-  marginBottom: 22,
+const comingSoonBadge = {
+  ...baseBadge,
+  background: 'rgba(148,163,184,0.95)',
+  color: '#0b1120',
 };
 
-const comingTitle = { fontSize: '1rem', marginBottom: 4 };
-const comingText = { fontSize: '0.85rem', color: '#cbd5f5' };
+const liveBadge = {
+  ...baseBadge,
+  background: 'rgba(34,197,94,0.25)',
+  color: '#22c55e',
+  border: '1px solid rgba(34,197,94,0.35)',
+};
 
 const errorText = {
-  marginTop: 20,
+  marginTop: 18,
   textAlign: 'center',
   color: '#fca5a5',
 };

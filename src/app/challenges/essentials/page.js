@@ -25,6 +25,8 @@ export default function EssentialsCollectionPage() {
   // certificate: 'not-submitted' | 'in-review' | 'approved' | 'rejected'
   const [certificateStatus, setCertificateStatus] = useState({});
 
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+
   const normalizeStatus = (s) => (s || '').toString().trim().toLowerCase();
 
   const getCertificateStateFromRows = (rows) => {
@@ -46,18 +48,35 @@ export default function EssentialsCollectionPage() {
       .join(' ');
   };
 
+  const resolveAssetUrl = (url) => {
+    const u = (url || '').toString().trim();
+    if (!u) return '';
+    if (u.startsWith('http://') || u.startsWith('https://')) return u;
+
+    // Supabase public storage URLs stored as "/storage/v1/object/public/..."
+    if (u.startsWith('/storage/')) {
+      if (!SUPABASE_URL) return u; // will fail, but avoids crashing if env missing
+      return `${SUPABASE_URL}${u}`;
+    }
+
+    // Next.js public/ paths (e.g. "/style_one/finished_reference.jpeg")
+    if (u.startsWith('/')) return u;
+
+    return u;
+  };
+
   const styles = useMemo(() => {
     return (essentialsChallenges || []).map((c, idx) => ({
       number: idx + 1,
       slug: c.slug,
       title: prettifySlug(c.slug),
       isLive: true,
-      // ✅ Use DB-provided thumbnail when present; fallback to existing asset
-      thumbSrc: c.thumbnail_url || '/style_one/finished_reference.jpeg',
+      thumbSrc: resolveAssetUrl(c.thumbnail_url),
       launchHref: `/challenges/${c.slug}/step1`,
       requiredSteps: Array.isArray(c.steps) ? c.steps.length : 4,
     }));
-  }, [essentialsChallenges]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [essentialsChallenges, SUPABASE_URL]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +109,7 @@ export default function EssentialsCollectionPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
-        // 3) Load Essentials challenges from DB (include thumbnail_url)
+        // 3) Load Essentials challenges from DB
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, steps, sort_order, thumbnail_url')
@@ -251,9 +270,7 @@ export default function EssentialsCollectionPage() {
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
           <div style={identityRow}>
             <SignedInAs style={identityPill} />
-            <span style={isPro ? proBadge : lockedBadge}>
-              {isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}
-            </span>
+            <span style={isPro ? proBadge : lockedBadge}>{isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}</span>
           </div>
         </div>
 
@@ -294,11 +311,15 @@ export default function EssentialsCollectionPage() {
               return (
                 <div key={s.slug} style={{ ...tile, opacity: launchBlocked ? 0.85 : 1 }}>
                   <div style={thumbWrap}>
-                    <img
-                      src={s.thumbSrc}
-                      alt={s.title}
-                      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                    />
+                    {s.thumbSrc ? (
+                      <img
+                        src={s.thumbSrc}
+                        alt={s.title}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%' }} />
+                    )}
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -306,7 +327,6 @@ export default function EssentialsCollectionPage() {
                       {s.title}
                     </div>
 
-                    {/* Match Menu: pills in a container row */}
                     <div style={statusRow}>
                       <span style={p.style}>{p.text}</span>
                       <span style={c.style}>{c.text}</span>

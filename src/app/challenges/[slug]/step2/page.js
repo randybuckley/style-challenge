@@ -192,7 +192,9 @@ function ChallengeStep2Page() {
     if (!challenge || !challenge.steps) return null
     const steps = Array.isArray(challenge.steps) ? challenge.steps : []
     if (!steps.length) return null
-    const byNumber = steps.find((s) => s.stepNumber === 2)
+
+    // ✅ stepNumber can be stored as a string in JSONB ("2"), so normalize.
+    const byNumber = steps.find((s) => Number(s.stepNumber) === 2)
     return byNumber || steps[1] || steps[0]
   })()
 
@@ -200,8 +202,16 @@ function ChallengeStep2Page() {
     stepConfig?.videoUrl ||
     'https://player.vimeo.com/video/1138763970?badge=0&autopause=0&player_id=0&app_id=58479'
 
-  const referenceImageUrl =
+  // Raw value from DB (can be /storage/... or full https://... or /public/... fallback)
+  const referenceImageUrlRaw =
     stepConfig?.referenceImageUrl || '/style_one/step2_reference.jpeg'
+
+  // ✅ If DB stores /storage/... paths, prefix with Supabase project URL so the browser loads it correctly.
+  const referenceImageUrl =
+    typeof referenceImageUrlRaw === 'string' &&
+    referenceImageUrlRaw.startsWith('/storage/')
+      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}${referenceImageUrlRaw}`
+      : referenceImageUrlRaw
 
   // ✅ DEMO "Your Version" image
   const demoYourImageUrl = '/demo/images/stylist_step2_reference.jpeg'

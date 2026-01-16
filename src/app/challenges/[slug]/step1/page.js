@@ -196,7 +196,9 @@ function ChallengeStep1Page() {
     if (!challenge || !challenge.steps) return null
     const steps = Array.isArray(challenge.steps) ? challenge.steps : []
     if (!steps.length) return null
-    const byNumber = steps.find((s) => s.stepNumber === 1)
+
+    // ✅ stepNumber is often stored as a string in JSONB ("1"), so normalize it.
+    const byNumber = steps.find((s) => Number(s.stepNumber) === 1)
     return byNumber || steps[0]
   })()
 
@@ -204,8 +206,16 @@ function ChallengeStep1Page() {
     stepConfig?.videoUrl ||
     'https://player.vimeo.com/video/1138763970?badge=0&autopause=0&player_id=0&app_id=58479'
 
-  const referenceImageUrl =
+  // Raw value from DB (can be /storage/... or full https://... or /public/... fallback)
+  const referenceImageUrlRaw =
     stepConfig?.referenceImageUrl || '/style_one/step1_reference.jpeg'
+
+  // ✅ If DB stores /storage/... paths, prefix with Supabase project URL so the browser loads it correctly.
+  const referenceImageUrl =
+    typeof referenceImageUrlRaw === 'string' &&
+    referenceImageUrlRaw.startsWith('/storage/')
+      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}${referenceImageUrlRaw}`
+      : referenceImageUrlRaw
 
   // ✅ DEMO "Your Version" image (you created these)
   const demoYourImageUrl = '/demo/images/stylist_step1_reference.jpeg'
@@ -578,7 +588,11 @@ function ChallengeStep1Page() {
           </p>
           <div style={overlayFrame}>
             {hasImage ? (
-              <img src={yourImageSrc} alt="Your Version" style={previewImageStyle} />
+              <img
+                src={yourImageSrc}
+                alt="Your Version"
+                style={previewImageStyle}
+              />
             ) : (
               <div
                 style={{
@@ -652,8 +666,8 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Make sure the hairstyle fills the frame in <strong>portrait</strong> mode, with the head and
-            hair inside the oval.
+            Make sure the hairstyle fills the frame in <strong>portrait</strong>{' '}
+            mode, with the head and hair inside the oval.
           </p>
 
           <button
@@ -673,7 +687,9 @@ function ChallengeStep1Page() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Move to Step 2'}
+            {uploading
+              ? 'Uploading…'
+              : '✅ Confirm, Add to Portfolio & Move to Step 2'}
           </button>
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
@@ -710,8 +726,8 @@ function ChallengeStep1Page() {
               marginBottom: '1rem',
             }}
           >
-            Does this image show your <strong>best work</strong> for Step 1? If yes, you’re ready to continue
-            your Style Challenge journey!
+            Does this image show your <strong>best work</strong> for Step 1? If
+            yes, you’re ready to continue your Style Challenge journey!
           </p>
 
           <button
