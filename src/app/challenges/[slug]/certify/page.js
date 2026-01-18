@@ -72,6 +72,21 @@ export default function ProCertifyPage() {
         return
       }
 
+      // 1b) Resolve challenge_id from the slug (submissions.challenge_id is NOT NULL)
+      const { data: challengeRow, error: cErr } = await supabase
+        .from('challenges')
+        .select('id')
+        .eq('slug', slug)
+        .single()
+
+      if (cErr || !challengeRow?.id) {
+        console.error('[challenges.select id by slug]', slug, cErr)
+        setErr(`We could not identify this challenge (${slug}). Please refresh and try again.`)
+        return
+      }
+
+      const challengeId = challengeRow.id
+
       // 2) Load latest uploads per step (1–4) for this stylist
       const { data: uploadRows, error: uErr } = await supabase
         .from('uploads')
@@ -106,6 +121,7 @@ export default function ProCertifyPage() {
       }
 
       // 3) Call /api/review/submit
+      // Include challenge_id so the API can satisfy submissions.challenge_id NOT NULL.
       const res = await fetch('/api/review/submit', {
         method: 'POST',
         headers: {
@@ -116,6 +132,11 @@ export default function ProCertifyPage() {
           userId: uid,
           userEmail: email,
           images: latestImages,
+
+          // required linkage
+          slug,
+          challengeId, // camelCase
+          challenge_id: challengeId, // snake_case
         }),
       })
 

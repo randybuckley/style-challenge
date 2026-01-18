@@ -46,9 +46,16 @@ export async function POST(req) {
       firstName: bodyFirst,
       secondName: bodySecond,
       salonName: bodySalon,
+
+      // IMPORTANT: challenge linkage (submissions.challenge_id is NOT NULL and unique with user_id)
+      challenge_id: bodyChallengeIdSnake,
+      challengeId: bodyChallengeIdCamel,
+
       // optional images passed from client – we’ll merge with DB-derived ones
-      images: bodyImages = {}
+      images: bodyImages = {},
     } = body || {}
+
+    const challengeId = bodyChallengeIdSnake || bodyChallengeIdCamel || null
 
     if (!userId) {
       return NextResponse.json(
@@ -57,9 +64,15 @@ export async function POST(req) {
       )
     }
 
+    if (!challengeId) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing challengeId' },
+        { status: 400 }
+      )
+    }
+
     // Base URL for links & logo
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin
     const site = baseUrl.replace(/\/+$/, '')
 
     // --- Look up profile to fill in blanks ---
@@ -86,13 +99,11 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
-    // NEW: pull latest step 1–4 uploads from DB if client didn't send URLs
+    // Pull latest step 1–4 uploads from DB if client didn't send URLs
     // ------------------------------------------------------------------
     let mergedImages = { ...bodyImages } // preserve any explicit overrides
 
-    const missingSteps = [1, 2, 3, 4].filter(
-      (step) => mergedImages[step] == null
-    )
+    const missingSteps = [1, 2, 3, 4].filter((step) => mergedImages[step] == null)
 
     if (missingSteps.length > 0) {
       const { data: rows, error: uploadsErr } = await supabaseAdmin
@@ -121,25 +132,34 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
-    // Create submission row with whatever images we now have
+    // UPSERT submission row (unique: user_id + challenge_id)
     // ------------------------------------------------------------------
     const reviewToken = crypto.randomUUID()
 
-    const { error: subErr } = await supabaseAdmin.from('submissions').insert({
+    const submissionPayload = {
       user_id: userId,
+      challenge_id: challengeId,
+
       email: userEmail,
       first_name: firstName || null,
       second_name: secondName || null,
       salon_name: salonName || null,
+
+      // overwrite token on resubmission so newest approval link is valid
       review_token: reviewToken,
+
       step1_url: mergedImages[1] || null,
       step2_url: mergedImages[2] || null,
       step3_url: mergedImages[3] || null,
-      finished_url: mergedImages[4] || null
-    })
+      finished_url: mergedImages[4] || null,
+    }
+
+    const { error: subErr } = await supabaseAdmin
+      .from('submissions')
+      .upsert(submissionPayload, { onConflict: 'user_id,challenge_id' })
 
     if (subErr) {
-      console.error('/api/review/submit: insert submissions error', subErr)
+      console.error('/api/review/submit: upsert submissions error', subErr)
       return NextResponse.json(
         { ok: false, error: `Could not save submission: ${subErr.message}` },
         { status: 500 }
@@ -151,8 +171,7 @@ export async function POST(req) {
 
     if (SENDGRID_API_KEY) {
       try {
-        const stylist =
-          [firstName, secondName].filter(Boolean).join(' ') || userEmail
+        const stylist = [firstName, secondName].filter(Boolean).join(' ') || userEmail
 
         const approveUrl = `${site}/api/review/decision?action=approve&token=${encodeURIComponent(
           reviewToken
@@ -164,11 +183,9 @@ export async function POST(req) {
         const thumbCells = [1, 2, 3, 4]
           .map((step) => {
             const raw = mergedImages?.[step]
-            const label =
-              step === 4 ? 'Finished Look' : `Step ${step}`
+            const label = step === 4 ? 'Finished Look' : `Step ${step}`
 
             if (!raw) {
-              // placeholder tile if no image
               return `
                 <td align="center" style="padding:4px 6px;font-size:12px;color:#777;">
                   <div style="margin-bottom:4px;font-weight:600;">${label}</div>
@@ -191,7 +208,6 @@ export async function POST(req) {
             }
 
             let src = String(raw)
-            // If it's just a storage path, prefix with Supabase public URL
             if (!/^https?:\/\//i.test(src) && SUPABASE_URL) {
               const baseSupabase = SUPABASE_URL.replace(/\/+$/, '')
               src = `${baseSupabase}/storage/v1/object/public/uploads/${src}`
@@ -249,14 +265,11 @@ export async function POST(req) {
                             : ''
                         }
                         <p style="margin:0 0 10px;font-size:14px;line-height:1.6">
-                          Email: <a href="mailto:${safe(userEmail)}">${safe(
-          userEmail
-        )}</a>
+                          Email: <a href="mailto:${safe(userEmail)}">${safe(userEmail)}</a>
                         </p>
                       </td>
                     </tr>
 
-                    <!-- thumbnails row -->
                     <tr>
                       <td style="padding:4px 22px 4px;">
                         <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
@@ -304,7 +317,7 @@ export async function POST(req) {
           subject: `Style Challenge submission — ${safe(
             [firstName, secondName].filter(Boolean).join(' ') || userEmail
           )}`,
-          html
+          html,
         })
 
         mailer = 'sent'
@@ -314,10 +327,7 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json(
-      { ok: true, token: reviewToken, mailer },
-      { status: 200 }
-    )
+    return NextResponse.json({ ok: true, token: reviewToken, mailer }, { status: 200 })
   } catch (err) {
     console.error('/api/review/submit: unexpected error', err)
     return NextResponse.json(

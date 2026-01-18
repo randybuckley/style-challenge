@@ -9,15 +9,34 @@ export const dynamic = 'force-dynamic'
 
 const safe = (v) => (v == null ? '' : String(v))
 
+// Strict ASCII filename sanitizer (prevents ByteString header crashes)
+function asciiFileName(input, fallback = 'Certificate.pdf') {
+  try {
+    const s = safe(input)
+      .normalize('NFKD') // split accents
+      .replace(/[\u2012-\u2015]/g, '-') // figure/en/em dashes -> hyphen
+      .replace(/[^\x00-\x7F]/g, '') // drop remaining non-ascii
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z0-9_.-]/g, '') // keep very safe set
+      .replace(/_+/g, '_')
+      .replace(/^-+|-+$/g, '')
+      .replace(/^_+|_+$/g, '')
+
+    if (!s) return fallback
+    return s.toLowerCase().endsWith('.pdf') ? s : `${s}.pdf`
+  } catch {
+    return fallback
+  }
+}
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
 
-    const stylistName   = safe(body.stylistName)   // required
-    const styleName     = safe(body.styleName)     // required
-    const date          = safe(body.date)          // required
+    const stylistName = safe(body.stylistName) // required
+    const styleName = safe(body.styleName) // required
+    const date = safe(body.date) // required
     const certificateId = safe(body.certificateId) // required
-    // salonName intentionally unused for now
 
     if (!stylistName || !styleName || !date || !certificateId) {
       return NextResponse.json(
@@ -39,20 +58,13 @@ export async function POST(req) {
     const page = pdf.addPage([certImage.width, certImage.height])
     const { width, height } = page.getSize()
 
-    page.drawImage(certImage, {
-      x: 0,
-      y: 0,
-      width,
-      height,
-    })
+    page.drawImage(certImage, { x: 0, y: 0, width, height })
 
     // --- Fonts (Montserrat) ---
     const montserratBytes = await readFile(
       fontAsset('Montserrat-VariableFont_wght.ttf')
     )
-    const montserratBoldBytes = await readFile(
-      fontAsset('Montserrat-Bold.ttf')
-    )
+    const montserratBoldBytes = await readFile(fontAsset('Montserrat-Bold.ttf'))
 
     const montserrat = await pdf.embedFont(montserratBytes)
     const montserratBold = await pdf.embedFont(montserratBoldBytes)
@@ -61,25 +73,22 @@ export async function POST(req) {
     const baseBold = montserratBold
     const colour = rgb(0, 0, 0)
 
-    const textWidth = (text, size, font) =>
-      font.widthOfTextAtSize(text, size)
-
-    const centerX = (text, size, font) =>
-      (width - textWidth(text, size, font)) / 2
+    const textWidth = (text, size, font) => font.widthOfTextAtSize(text, size)
+    const centerX = (text, size, font) => (width - textWidth(text, size, font)) / 2
 
     // Points per cm
     const CM = 28.3465
 
     // --- Sizes ---
-    const titleSize  = height * 0.025    // “This certifies that”
-    const nameSize   = height * 0.035    // STYLIST NAME
-    const bodySize   = height * 0.020    // body lines
-    const footerSize = height * 0.015    // footer block
+    const titleSize = height * 0.025
+    const nameSize = height * 0.035
+    const bodySize = height * 0.02
+    const footerSize = height * 0.015
 
     const lineGap = bodySize * 1.4
 
     // =====================================================
-    // 1) MAIN CENTRE BLOCK — “This certifies that…”
+    // 1) MAIN CENTRE BLOCK
     // =====================================================
     const line1 = 'This certifies that'
     const nameLine = stylistName.toUpperCase()
@@ -87,23 +96,19 @@ export async function POST(req) {
     const line4 = styleName
 
     const lines = [
-      { text: line1,    size: titleSize, font: baseFont },
-      { text: nameLine, size: nameSize,  font: baseBold },
-      { text: line3,    size: bodySize,  font: baseFont },
-      { text: line4,    size: bodySize,  font: baseBold },
+      { text: line1, size: titleSize, font: baseFont },
+      { text: nameLine, size: nameSize, font: baseBold },
+      { text: line3, size: bodySize, font: baseFont },
+      { text: line4, size: bodySize, font: baseBold },
     ]
 
     const totalBlockHeight =
-      lines.reduce((sum, l) => sum + l.size, 0) +
-      lineGap * (lines.length - 1)
+      lines.reduce((sum, l) => sum + l.size, 0) + lineGap * (lines.length - 1)
 
-    // Existing overall block position (do not change)
     const blockCentreY = height * 0.42 - 22 * CM
     let y = blockCentreY + totalBlockHeight / 2
 
     for (const line of lines) {
-      // Lift the two middle lines ("has successfully completed" and styleName)
-      // by 1 cm relative to the rest of the block.
       let yAdjusted = y
       if (line.text === line3 || line.text === line4) {
         yAdjusted += 1 * CM
@@ -121,18 +126,14 @@ export async function POST(req) {
     }
 
     // =====================================================
-    // 2) BOTTOM-LEFT FOOTER BLOCK — Awarded / Certificate
+    // 2) BOTTOM-LEFT FOOTER BLOCK
     // =====================================================
     const footerX = width * 0.16
-    const footerBaseY = height * 0.14 - 6 * CM // existing offset
+    const footerBaseY = height * 0.14 - 6 * CM
 
-    const footerLines = [
-      `Awarded: ${date}`,
-      `Certificate: ${certificateId}`,
-    ]
+    const footerLines = [`Awarded: ${date}`, `Certificate: ${certificateId}`]
 
     let fy = footerBaseY + footerLines.length * (footerSize + 2)
-
     for (const text of footerLines) {
       page.drawText(text, {
         x: footerX,
@@ -147,9 +148,8 @@ export async function POST(req) {
     // --- Save & return ---
     const pdfBytes = await pdf.save()
 
-    const stylistSlug = stylistName.replace(/\s+/g, '_')
-    const styleSlug = styleName.replace(/\s+/g, '_')
-    const fileName = `Certificate_${stylistSlug}_${styleSlug}.pdf`
+    // IMPORTANT: sanitize filename to strict ASCII for Content-Disposition
+    const fileName = asciiFileName(`Certificate_${stylistName}_${styleName}`)
 
     return new NextResponse(Buffer.from(pdfBytes), {
       headers: {

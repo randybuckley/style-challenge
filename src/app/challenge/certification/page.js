@@ -7,6 +7,12 @@ import { supabase } from '../../../lib/supabaseClient'
 export default function CertificationPage() {
   const router = useRouter()
 
+  // IMPORTANT:
+  // This must match an existing row in public.challenges.slug.
+  // Your screenshot shows 'starter-style' exists in challenges.
+  // If this page should submit a different challenge, change this slug accordingly.
+  const CHALLENGE_SLUG = 'starter-style'
+
   // session / profile
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -124,8 +130,27 @@ export default function CertificationPage() {
         throw new Error(`Profile save failed: ${saveErr.message}`)
       }
 
+      // NEW (minimal fix): resolve challenge_id (submissions.challenge_id is NOT NULL in your DB)
+      const { data: challengeRow, error: chErr } = await supabase
+        .from('challenges')
+        .select('id')
+        .eq('slug', CHALLENGE_SLUG)
+        .single()
+
+      if (chErr) {
+        console.error('[challenges.select]', chErr)
+        throw new Error(`Could not resolve challenge_id for slug "${CHALLENGE_SLUG}": ${chErr.message}`)
+      }
+      if (!challengeRow?.id) {
+        throw new Error(`Could not resolve challenge_id for slug "${CHALLENGE_SLUG}".`)
+      }
+
       const review_token = makeToken()
       const payload = {
+        // REQUIRED by DB:
+        challenge_id: challengeRow.id,
+
+        // Existing fields unchanged:
         user_id: user.id,
         email: user.email ?? null,
         first_name: (firstName || '').trim() || null,
