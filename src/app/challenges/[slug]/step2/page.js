@@ -462,9 +462,7 @@ function ChallengeStep2Page() {
         }}
       />
 
-      <p style={{ marginBottom: '0.75rem', fontSize: '1rem', color: '#ddd' }}>
-        Now refine the foundation you created in Step 1 and build the shape.
-      </p>
+     
 
       <ol
         style={{
