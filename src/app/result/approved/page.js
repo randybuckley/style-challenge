@@ -1,16 +1,18 @@
 // src/app/result/approved/page.js
 'use client'
 
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, Suspense } from 'react'
 
 function ApprovedResultInner() {
   const searchParams = useSearchParams()
+  const router = useRouter()
 
   const token = searchParams.get('token') || ''
   const userEmail = searchParams.get('userEmail') || ''
 
   const [busy, setBusy] = useState(false)
+  const [downloaded, setDownloaded] = useState(false)
 
   async function handleCertificateClick() {
     if (!token) {
@@ -18,13 +20,13 @@ function ApprovedResultInner() {
       return
     }
     if (!userEmail) {
-      alert(
-        'Sorry, we are missing your email address for this certificate link.'
-      )
+      alert('Sorry, we are missing your email address for this certificate link.')
       return
     }
 
     setBusy(true)
+    setDownloaded(false)
+
     try {
       // 1) Fetch certificate metadata from our API
       const metaRes = await fetch('/api/review-certification', {
@@ -96,6 +98,8 @@ function ApprovedResultInner() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
+
+      setDownloaded(true)
     } catch (err) {
       console.error('Unexpected error while preparing certificate:', err)
       alert(
@@ -107,6 +111,14 @@ function ApprovedResultInner() {
     }
   }
 
+  function goToCollections() {
+    router.push('/challenges/menu')
+  }
+
+  function goToEssentials() {
+    router.push('/challenges/essentials')
+  }
+
   // ---- styles ----
   const pageShell = {
     minHeight: '100vh',
@@ -116,8 +128,7 @@ function ApprovedResultInner() {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    fontFamily:
-      'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+    fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
   }
 
   const headerLogoWrap = {
@@ -166,6 +177,31 @@ function ApprovedResultInner() {
     minWidth: 220,
   }
 
+  const navRow = {
+    marginTop: 12,
+    display: 'flex',
+    gap: 10,
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+  }
+
+  const navBtnBase = {
+    border: '1px solid #2b2b2b',
+    background: '#101010',
+    color: '#eaeaea',
+    borderRadius: 10,
+    padding: '11px 14px',
+    fontWeight: 800,
+    cursor: 'pointer',
+    minWidth: 220,
+    boxShadow: '0 10px 22px rgba(0,0,0,.18)',
+  }
+
+  const navBtnPrimary = {
+    ...navBtnBase,
+    background: 'rgba(255,255,255,0.06)',
+  }
+
   const infoStrip = {
     margin: '14px auto 4px',
     padding: '10px 12px',
@@ -195,15 +231,17 @@ function ApprovedResultInner() {
     marginTop: 2,
   }
 
+  const downloadedNote = {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#9fe6b0',
+  }
+
   return (
     <main style={pageShell}>
       {/* Logo header */}
       <div style={headerLogoWrap}>
-        <img
-          src="/logo.jpeg"
-          alt="Patrick Cameron — Style Challenge"
-          style={logoStyle}
-        />
+        <img src="/logo.jpeg" alt="Patrick Cameron — Style Challenge" style={logoStyle} />
       </div>
 
       {/* Vimeo: Patrick's congratulations */}
@@ -242,21 +280,30 @@ function ApprovedResultInner() {
               Your certificate is ready to download.
             </div>
             <div>
-              Click the button below and we&apos;ll prepare a printable PDF
-              certificate with your name and challenge details. You can save it,
-              print it, or share it online.
+              Click the button below and we&apos;ll prepare a printable PDF certificate with your
+              name and challenge details. You can save it, print it, or share it online.
             </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleCertificateClick}
-          disabled={busy}
-          style={btn}
-        >
+        <button type="button" onClick={handleCertificateClick} disabled={busy} style={btn}>
           {busy ? 'Preparing your certificate…' : 'Download your certificate'}
         </button>
+
+        {downloaded ? (
+          <div style={downloadedNote}>
+            Downloaded. You can return to Collections or continue with Essentials.
+          </div>
+        ) : null}
+
+        <div style={navRow}>
+          <button type="button" onClick={goToCollections} style={navBtnPrimary}>
+            Back to Collections
+          </button>
+          <button type="button" onClick={goToEssentials} style={navBtnBase}>
+            Go to Essentials
+          </button>
+        </div>
       </div>
     </main>
   )
@@ -275,8 +322,7 @@ export default function ApprovedResultPage() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontFamily:
-              'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
+            fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
           }}
         >
           Loading…
