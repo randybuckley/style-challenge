@@ -116,7 +116,6 @@ export default function ChallengesMenuPage() {
         if (!colErr && Array.isArray(dbCollections)) {
           if (!cancelled) setCollections(dbCollections);
         } else if (colErr) {
-          // Don’t fail the whole page; we can still show Starter + fallbacks.
           console.warn('[menu] collections load error:', colErr);
           if (!cancelled) setCollections([]);
         }
@@ -138,7 +137,7 @@ export default function ChallengesMenuPage() {
 
         const challengeIdToSlug = {};
         const requiredStepsBySlug = {};
-        const essentialsSlugs = [];
+        const essentialsSlugsLocal = [];
 
         (challenges || []).forEach((c) => {
           if (!c?.id || !c?.slug) return;
@@ -147,7 +146,7 @@ export default function ChallengesMenuPage() {
           const required = Array.isArray(c.steps) ? c.steps.length : 4;
           requiredStepsBySlug[c.slug] = required;
 
-          if (c.slug.startsWith('essentials-')) essentialsSlugs.push(c.slug);
+          if (c.slug.startsWith('essentials-')) essentialsSlugsLocal.push(c.slug);
         });
 
         const { data: uploads, error: upErr } = await supabase
@@ -173,19 +172,14 @@ export default function ChallengesMenuPage() {
         const starterRequired = requiredStepsBySlug[starterSlug] ?? 4;
 
         portfolioBySlug[starterSlug] =
-          starterCount >= starterRequired
-            ? 'complete'
-            : starterCount > 0
-              ? 'in-progress'
-              : 'not-started';
+          starterCount >= starterRequired ? 'complete' : starterCount > 0 ? 'in-progress' : 'not-started';
 
         // Essentials status (for badge)
-        essentialsSlugs.forEach((slug) => {
+        essentialsSlugsLocal.forEach((slug) => {
           const count = stepsBySlug[slug]?.size || 0;
           const required = requiredStepsBySlug[slug] ?? 4;
 
-          portfolioBySlug[slug] =
-            count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
+          portfolioBySlug[slug] = count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
         });
 
         const { data: submissions, error: subErr } = await supabase
@@ -206,7 +200,7 @@ export default function ChallengesMenuPage() {
         const certificateBySlug = {};
         certificateBySlug[starterSlug] = getCertificateStateFromRows(rowsBySlug[starterSlug] || []);
 
-        essentialsSlugs.forEach((slug) => {
+        essentialsSlugsLocal.forEach((slug) => {
           certificateBySlug[slug] = getCertificateStateFromRows(rowsBySlug[slug] || []);
         });
 
@@ -237,26 +231,26 @@ export default function ChallengesMenuPage() {
     [portfolioStatus]
   );
 
-  const essentialsCompleted =
+  const essentialsAllCompleteAndApproved =
     essentialsSlugs.length > 0 &&
     essentialsSlugs.every(
       (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
     );
 
+  const essentialsAnyStarted =
+    essentialsSlugs.length > 0 &&
+    essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');
+
   // If collections table empty or failing, render sensible fallbacks
   const menuCollections = useMemo(() => {
     if (Array.isArray(collections) && collections.length > 0) return collections;
 
-    // Fallback set (keeps menu looking complete even before DB rows exist)
     return [
       {
         slug: 'essentials',
         title: 'Patrick Cameron Essentials',
-        description:
-          'A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.',
-        hero_image_url:
-          (SUPABASE_URL ? `${SUPABASE_URL}` : '') +
-          '/storage/v1/object/public/assets/collections/essentials_hero.jpeg',
+        description: 'A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.',
+        hero_image_url: (SUPABASE_URL ? `${SUPABASE_URL}` : '') + '/storage/v1/object/public/assets/collections/essentials_hero.jpeg',
         placeholder_image_url: FALLBACK_PLACEHOLDER,
         launch_path: '/challenges/essentials',
         sort_order: 10,
@@ -289,7 +283,7 @@ export default function ChallengesMenuPage() {
         status: 'coming-soon',
       },
     ];
-  }, [collections, SUPABASE_URL]);
+  }, [collections, SUPABASE_URL, FALLBACK_PLACEHOLDER]);
 
   if (loading) {
     return (
@@ -339,10 +333,11 @@ export default function ChallengesMenuPage() {
             <div style={cardLeft}>
               <img src="/style_one/finished_reference.jpeg" alt="Starter Style Challenge" style={thumb} />
               <div style={{ minWidth: 0 }}>
-                <div style={eyebrow}>Starter Challenge</div>
+                <div style={eyebrowMuted}>Free trial</div>
+
                 <div style={cardTitle}>Starter Style Challenge</div>
                 <p style={cardText}>
-                  The original free challenge that introduces the Style Challenge format.
+                  Try the Style Challenge experience — see how it works, upload your steps, and get your first result.
                 </p>
 
                 <div style={statusRow}>
@@ -351,16 +346,16 @@ export default function ChallengesMenuPage() {
                       starterPortfolioState === 'complete'
                         ? statusPillComplete
                         : starterPortfolioState === 'in-progress'
-                          ? statusPillProgress
-                          : statusPillIdle
+                        ? statusPillProgress
+                        : statusPillIdle
                     }
                     title="Portfolio progress"
                   >
                     {starterPortfolioState === 'complete'
                       ? 'PORTFOLIO: COMPLETE'
                       : starterPortfolioState === 'in-progress'
-                        ? 'PORTFOLIO: IN PROGRESS'
-                        : 'PORTFOLIO: NOT STARTED'}
+                      ? 'PORTFOLIO: IN PROGRESS'
+                      : 'PORTFOLIO: NOT STARTED'}
                   </span>
 
                   <span
@@ -368,20 +363,20 @@ export default function ChallengesMenuPage() {
                       starterCertState === 'approved'
                         ? statusPillComplete
                         : starterCertState === 'in-review'
-                          ? statusPillProgress
-                          : starterCertState === 'rejected'
-                            ? statusPillRejected
-                            : statusPillIdle
+                        ? statusPillProgress
+                        : starterCertState === 'rejected'
+                        ? statusPillRejected
+                        : statusPillIdle
                     }
                     title="Certificate progress"
                   >
                     {starterCertState === 'approved'
                       ? 'CERTIFICATE: APPROVED'
                       : starterCertState === 'in-review'
-                        ? 'CERTIFICATE: IN REVIEW'
-                        : starterCertState === 'rejected'
-                          ? 'CERTIFICATE: REJECTED'
-                          : 'CERTIFICATE: NOT SUBMITTED'}
+                      ? 'CERTIFICATE: IN REVIEW'
+                      : starterCertState === 'rejected'
+                      ? 'CERTIFICATE: REJECTED'
+                      : 'CERTIFICATE: NOT SUBMITTED'}
                   </span>
                 </div>
               </div>
@@ -389,7 +384,7 @@ export default function ChallengesMenuPage() {
 
             <div style={cardRight(isNarrow)}>
               <Link href="/challenges/starter-style/step1" style={greenButton(isNarrow)}>
-                Launch the challenge
+                Try this free challenge
               </Link>
             </div>
           </div>
@@ -399,9 +394,7 @@ export default function ChallengesMenuPage() {
         <section style={collectionsSection}>
           <div style={collectionsHeader}>
             <h2 style={collectionsTitle}>Collections</h2>
-            <p style={collectionsText}>
-              Choose a collection below. Essentials is the best place to start.
-            </p>
+            <p style={collectionsText}>Choose a collection below. Essentials is the best place to start.</p>
           </div>
 
           <div style={collectionsGrid(isNarrow)}>
@@ -417,21 +410,29 @@ export default function ChallengesMenuPage() {
 
               const isEssentials = c.slug === 'essentials';
 
-              const badgeText = isComingSoon
-                ? 'COMING SOON'
-                : isEssentials
-                  ? essentialsCompleted
-                    ? 'COMPLETED'
-                    : 'IN PROGRESS'
-                  : 'LIVE';
+              // ✅ FIX: Essentials should NOT default to "IN PROGRESS" when nothing has started
+              let badgeText = 'LIVE';
+              let badgeStyle = liveBadge;
 
-              const badgeStyle = isComingSoon
-                ? comingSoonBadge
-                : isEssentials
-                  ? essentialsCompleted
-                    ? completedBadge
-                    : progressBadge
-                  : liveBadge;
+              if (isComingSoon) {
+                badgeText = 'COMING SOON';
+                badgeStyle = comingSoonBadge;
+              } else if (isEssentials) {
+                if (essentialsSlugs.length === 0) {
+                  // No essentials-* challenges found → don’t invent progress
+                  badgeText = 'LIVE';
+                  badgeStyle = liveBadge;
+                } else if (essentialsAllCompleteAndApproved) {
+                  badgeText = 'COMPLETED';
+                  badgeStyle = completedBadge;
+                } else if (essentialsAnyStarted) {
+                  badgeText = 'IN PROGRESS';
+                  badgeStyle = progressBadge;
+                } else {
+                  badgeText = 'NOT STARTED';
+                  badgeStyle = notStartedBadge;
+                }
+              }
 
               const canLaunch = isLive && !!c.launch_path;
 
@@ -587,6 +588,12 @@ const eyebrow = {
   color: '#9ca3af',
 };
 
+const eyebrowMuted = {
+  ...eyebrow,
+  color: '#94a3b8',
+  opacity: 0.9,
+};
+
 const cardTitle = { fontSize: '1rem', fontWeight: 600 };
 const cardText = { fontSize: '0.85rem', color: '#cbd5f5', margin: 0 };
 
@@ -675,9 +682,7 @@ const collectionsGrid = (isNarrow) => ({
   gap: 14,
 });
 
-const collectionCard = {
-  marginBottom: 0,
-};
+const collectionCard = { marginBottom: 0 };
 
 const collectionInner = {
   borderRadius: 16,
@@ -734,6 +739,12 @@ const completedBadge = {
 const progressBadge = {
   ...baseBadge,
   background: '#facc15',
+  color: '#0b1120',
+};
+
+const notStartedBadge = {
+  ...baseBadge,
+  background: 'rgba(148,163,184,0.95)',
   color: '#0b1120',
 };
 
