@@ -1,9 +1,18 @@
 // src/app/api/review/decision/route.js
 import { NextResponse } from 'next/server'
 import sgMail from '@sendgrid/mail'
+import { createClient } from '@supabase/supabase-js'
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY
 const SENDGRID_FROM = process.env.SENDGRID_FROM || 'no-reply@accesslonghair.com'
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+const supabaseAdmin =
+  SUPABASE_URL && SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    : null
 
 const safe = (v) => (v == null ? '' : String(v))
 
@@ -17,8 +26,77 @@ function normalizeActionFromDecision(decisionOrAction) {
   if (!v) return ''
   if (v === 'approve' || v === 'approved') return 'approve'
   if (v === 'reject' || v === 'rejected') return 'reject'
-  // allow passing through "approve"/"reject" explicitly
   return v
+}
+
+async function updateSubmissionStatusByToken({ token, action }) {
+  // Fail-soft: don’t break Patrick’s flow if env is missing or DB update fails.
+  if (!supabaseAdmin) {
+    console.error('/api/review/decision: Supabase admin client not configured')
+    return { ok: false, reason: 'no-admin-client' }
+  }
+
+  try {
+    // 1) Lookup submission by review_token
+    const { data: sub, error: subErr } = await supabaseAdmin
+      .from('submissions')
+      .select('id, challenge_id, challenge_slug')
+      .eq('review_token', token)
+      .maybeSingle()
+
+    if (subErr) {
+      console.error('/api/review/decision: submission lookup error', subErr)
+      return { ok: false, reason: 'lookup-error' }
+    }
+
+    if (!sub) {
+      console.error('/api/review/decision: no submission found for token', token)
+      return { ok: false, reason: 'not-found' }
+    }
+
+    // 2) Resolve slug if missing (Essentials status depends on challenge_slug)
+    let resolvedSlug = sub.challenge_slug || null
+
+    if (!resolvedSlug && sub.challenge_id) {
+      const { data: ch, error: chErr } = await supabaseAdmin
+        .from('challenges')
+        .select('slug')
+        .eq('id', sub.challenge_id)
+        .maybeSingle()
+
+      if (chErr) {
+        console.error('/api/review/decision: challenges lookup error', chErr)
+      } else {
+        resolvedSlug = ch?.slug || null
+      }
+    }
+
+    // 3) Update submission
+    const newStatus = action === 'approve' ? 'approved' : 'rejected'
+    const payload = {
+      status: newStatus,
+      reviewed_at: new Date().toISOString(),
+    }
+
+    if (!sub.challenge_slug && resolvedSlug) {
+      payload.challenge_slug = resolvedSlug
+    }
+
+    const { error: updErr } = await supabaseAdmin
+      .from('submissions')
+      .update(payload)
+      .eq('id', sub.id)
+
+    if (updErr) {
+      console.error('/api/review/decision: submission update error', updErr)
+      return { ok: false, reason: 'update-error' }
+    }
+
+    return { ok: true }
+  } catch (e) {
+    console.error('/api/review/decision: unexpected db error', e)
+    return { ok: false, reason: 'unexpected' }
+  }
 }
 
 /**
@@ -32,13 +110,18 @@ export async function GET(req) {
 
     const action = safe(url.searchParams.get('action')).toLowerCase()
     const token = safe(url.searchParams.get('token'))
-    const userEmail = safe(url.searchParams.get('userEmail') || url.searchParams.get('ue'))
+    const userEmail = safe(
+      url.searchParams.get('userEmail') || url.searchParams.get('ue')
+    )
 
     if (!token) {
       return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
     }
 
     if (action === 'approve') {
+      // ✅ NEW: mark submission approved (and backfill challenge_slug if needed)
+      await updateSubmissionStatusByToken({ token, action: 'approve' })
+
       try {
         if (SENDGRID_API_KEY && userEmail) {
           sgMail.setApiKey(SENDGRID_API_KEY)
@@ -103,16 +186,25 @@ export async function GET(req) {
         // don't block Patrick if mail fails
       }
 
+      // Preserve existing Patrick redirect
       return NextResponse.redirect(`${origin}/review/approved`, 302)
     }
 
     if (action === 'reject') {
-      return NextResponse.redirect(`${origin}/review/${encodeURIComponent(token)}`, 302)
+      // ✅ NEW: mark submission rejected (and backfill challenge_slug if needed)
+      await updateSubmissionStatusByToken({ token, action: 'reject' })
+
+      // Preserve existing Patrick redirect
+      return NextResponse.redirect(
+        `${origin}/review/${encodeURIComponent(token)}`,
+        302
+      )
     }
 
     return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
   } catch {
-    const origin = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/+$/, '')
+    const origin = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000')
+      .replace(/\/+$/, '')
     return NextResponse.redirect(`${origin}/challenge/certify?msg=error`, 302)
   }
 }
@@ -161,6 +253,9 @@ export async function POST(req) {
     return NextResponse.redirect(target, 307)
   } catch (err) {
     console.error('POST /api/review/decision shim failed', err)
-    return NextResponse.json({ error: 'Failed to proxy decision.' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Failed to proxy decision.' },
+      { status: 500 }
+    )
   }
 }

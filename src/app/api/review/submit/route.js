@@ -51,11 +51,16 @@ export async function POST(req) {
       challenge_id: bodyChallengeIdSnake,
       challengeId: bodyChallengeIdCamel,
 
+      // NEW: slug linkage (submissions.challenge_slug is used by Essentials status mapping)
+      challenge_slug: bodyChallengeSlugSnake,
+      challengeSlug: bodyChallengeSlugCamel,
+
       // optional images passed from client – we’ll merge with DB-derived ones
       images: bodyImages = {},
     } = body || {}
 
     const challengeId = bodyChallengeIdSnake || bodyChallengeIdCamel || null
+    const challengeSlug = bodyChallengeSlugSnake || bodyChallengeSlugCamel || null
 
     if (!userId) {
       return NextResponse.json(
@@ -99,6 +104,26 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
+    // NEW: Ensure we persist challenge_slug for Essentials status mapping.
+    // If not provided by the client, look it up from `challenges` by id.
+    // ------------------------------------------------------------------
+    let resolvedChallengeSlug = challengeSlug
+
+    if (!resolvedChallengeSlug) {
+      const { data: chRow, error: chLookupErr } = await supabaseAdmin
+        .from('challenges')
+        .select('slug')
+        .eq('id', challengeId)
+        .maybeSingle()
+
+      if (chLookupErr) {
+        console.error('/api/review/submit: challenges lookup error', chLookupErr)
+      }
+
+      resolvedChallengeSlug = chRow?.slug || null
+    }
+
+    // ------------------------------------------------------------------
     // Pull latest step 1–4 uploads from DB if client didn't send URLs
     // ------------------------------------------------------------------
     let mergedImages = { ...bodyImages } // preserve any explicit overrides
@@ -139,6 +164,7 @@ export async function POST(req) {
     const submissionPayload = {
       user_id: userId,
       challenge_id: challengeId,
+      challenge_slug: resolvedChallengeSlug,
 
       email: userEmail,
       first_name: firstName || null,
@@ -171,7 +197,8 @@ export async function POST(req) {
 
     if (SENDGRID_API_KEY) {
       try {
-        const stylist = [firstName, secondName].filter(Boolean).join(' ') || userEmail
+        const stylist =
+          [firstName, secondName].filter(Boolean).join(' ') || userEmail
 
         const approveUrl = `${site}/api/review/decision?action=approve&token=${encodeURIComponent(
           reviewToken
@@ -265,7 +292,9 @@ export async function POST(req) {
                             : ''
                         }
                         <p style="margin:0 0 10px;font-size:14px;line-height:1.6">
-                          Email: <a href="mailto:${safe(userEmail)}">${safe(userEmail)}</a>
+                          Email: <a href="mailto:${safe(userEmail)}">${safe(
+          userEmail
+        )}</a>
                         </p>
                       </td>
                     </tr>
@@ -327,7 +356,15 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json({ ok: true, token: reviewToken, mailer }, { status: 200 })
+    return NextResponse.json(
+      {
+        ok: true,
+        token: reviewToken,
+        mailer,
+        challengeSlug: resolvedChallengeSlug || null,
+      },
+      { status: 200 }
+    )
   } catch (err) {
     console.error('/api/review/submit: unexpected error', err)
     return NextResponse.json(

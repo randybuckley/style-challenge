@@ -102,7 +102,6 @@ export default function ChallengesMenuPage() {
 
         // ------------------------------------------------------------
         // Load collections for menu cards (DB-driven; no redeploy needed)
-        // status is constrained to: 'live' | 'coming-soon' | 'hidden'
         // ------------------------------------------------------------
         const { data: dbCollections, error: colErr } = await supabase
           .from('collections')
@@ -125,12 +124,14 @@ export default function ChallengesMenuPage() {
         // ------------------------------------------------------------
         // Progress + certificate only needed for:
         // - starter-style challenge card
-        // - essentials badge (computed from essentials-* challenges)
+        // - essentials badge (computed from essentials challenges)
+        //
+        // IMPORTANT: Use collection_slug (schema truth), not slug prefixes.
         // ------------------------------------------------------------
         const { data: challenges, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug, steps, sort_order')
-          .or('slug.eq.starter-style,slug.like.essentials-%')
+          .select('id, slug, steps, sort_order, collection_slug')
+          .in('collection_slug', ['starter', 'essentials'])
           .order('sort_order', { ascending: true });
 
         if (chErr) throw chErr;
@@ -146,9 +147,10 @@ export default function ChallengesMenuPage() {
           const required = Array.isArray(c.steps) ? c.steps.length : 4;
           requiredStepsBySlug[c.slug] = required;
 
-          if (c.slug.startsWith('essentials-')) essentialsSlugsLocal.push(c.slug);
+          if (c.collection_slug === 'essentials') essentialsSlugsLocal.push(c.slug);
         });
 
+        // Uploads (portfolio)
         const { data: uploads, error: upErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
@@ -172,27 +174,38 @@ export default function ChallengesMenuPage() {
         const starterRequired = requiredStepsBySlug[starterSlug] ?? 4;
 
         portfolioBySlug[starterSlug] =
-          starterCount >= starterRequired ? 'complete' : starterCount > 0 ? 'in-progress' : 'not-started';
+          starterCount >= starterRequired
+            ? 'complete'
+            : starterCount > 0
+              ? 'in-progress'
+              : 'not-started';
 
         // Essentials status (for badge)
         essentialsSlugsLocal.forEach((slug) => {
           const count = stepsBySlug[slug]?.size || 0;
           const required = requiredStepsBySlug[slug] ?? 4;
-
-          portfolioBySlug[slug] = count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
+          portfolioBySlug[slug] =
+            count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
         });
 
+        // ------------------------------------------------------------
+        // Submissions (certificate)
+        // IMPORTANT: Key by challenge_id where available (source of truth),
+        // fallback to challenge_slug only if needed.
+        // ------------------------------------------------------------
         const { data: submissions, error: subErr } = await supabase
           .from('submissions')
-          .select('challenge_slug, status, submitted_at, reviewed_at')
+          .select('challenge_id, challenge_slug, status, submitted_at, reviewed_at')
           .eq('user_id', sessionUser.id);
 
         if (subErr) throw subErr;
 
         const rowsBySlug = {};
         (submissions || []).forEach((s) => {
-          const slug = s?.challenge_slug;
+          const slugFromId = s?.challenge_id ? challengeIdToSlug[s.challenge_id] : null;
+          const slug = slugFromId || s?.challenge_slug;
           if (!slug) return;
+
           if (!rowsBySlug[slug]) rowsBySlug[slug] = [];
           rowsBySlug[slug].push(s);
         });
@@ -225,21 +238,18 @@ export default function ChallengesMenuPage() {
   const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
   const starterCertState = certificateStatus['starter-style'] || 'not-submitted';
 
-  // Essentials badge logic (based on essentials-* challenges)
+  // Essentials badge logic (based on challenges in essentials collection)
   const essentialsSlugs = useMemo(
-    () => Object.keys(portfolioStatus).filter((s) => s.startsWith('essentials-')),
+    () => Object.keys(portfolioStatus).filter((s) => s !== 'starter-style'),
     [portfolioStatus]
   );
 
   const essentialsAllCompleteAndApproved =
     essentialsSlugs.length > 0 &&
-    essentialsSlugs.every(
-      (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
-    );
+    essentialsSlugs.every((slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved');
 
   const essentialsAnyStarted =
-    essentialsSlugs.length > 0 &&
-    essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');
+    essentialsSlugs.length > 0 && essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');
 
   // If collections table empty or failing, render sensible fallbacks
   const menuCollections = useMemo(() => {
@@ -249,8 +259,11 @@ export default function ChallengesMenuPage() {
       {
         slug: 'essentials',
         title: 'Patrick Cameron Essentials',
-        description: 'A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.',
-        hero_image_url: (SUPABASE_URL ? `${SUPABASE_URL}` : '') + '/storage/v1/object/public/assets/collections/essentials_hero.jpeg',
+        description:
+          'A focused set of core styles designed to make you faster, calmer, and more profitable in the salon.',
+        hero_image_url:
+          (SUPABASE_URL ? `${SUPABASE_URL}` : '') +
+          '/storage/v1/object/public/assets/collections/essentials_hero.jpeg',
         placeholder_image_url: FALLBACK_PLACEHOLDER,
         launch_path: '/challenges/essentials',
         sort_order: 10,
@@ -346,16 +359,16 @@ export default function ChallengesMenuPage() {
                       starterPortfolioState === 'complete'
                         ? statusPillComplete
                         : starterPortfolioState === 'in-progress'
-                        ? statusPillProgress
-                        : statusPillIdle
+                          ? statusPillProgress
+                          : statusPillIdle
                     }
                     title="Portfolio progress"
                   >
                     {starterPortfolioState === 'complete'
                       ? 'PORTFOLIO: COMPLETE'
                       : starterPortfolioState === 'in-progress'
-                      ? 'PORTFOLIO: IN PROGRESS'
-                      : 'PORTFOLIO: NOT STARTED'}
+                        ? 'PORTFOLIO: IN PROGRESS'
+                        : 'PORTFOLIO: NOT STARTED'}
                   </span>
 
                   <span
@@ -363,20 +376,20 @@ export default function ChallengesMenuPage() {
                       starterCertState === 'approved'
                         ? statusPillComplete
                         : starterCertState === 'in-review'
-                        ? statusPillProgress
-                        : starterCertState === 'rejected'
-                        ? statusPillRejected
-                        : statusPillIdle
+                          ? statusPillProgress
+                          : starterCertState === 'rejected'
+                            ? statusPillRejected
+                            : statusPillIdle
                     }
                     title="Certificate progress"
                   >
                     {starterCertState === 'approved'
                       ? 'CERTIFICATE: APPROVED'
                       : starterCertState === 'in-review'
-                      ? 'CERTIFICATE: IN REVIEW'
-                      : starterCertState === 'rejected'
-                      ? 'CERTIFICATE: REJECTED'
-                      : 'CERTIFICATE: NOT SUBMITTED'}
+                        ? 'CERTIFICATE: IN REVIEW'
+                        : starterCertState === 'rejected'
+                          ? 'CERTIFICATE: REJECTED'
+                          : 'CERTIFICATE: NOT SUBMITTED'}
                   </span>
                 </div>
               </div>
@@ -410,7 +423,7 @@ export default function ChallengesMenuPage() {
 
               const isEssentials = c.slug === 'essentials';
 
-              // ✅ FIX: Essentials should NOT default to "IN PROGRESS" when nothing has started
+              // Badge for menu tiles (keep lightweight)
               let badgeText = 'LIVE';
               let badgeStyle = liveBadge;
 
@@ -419,7 +432,6 @@ export default function ChallengesMenuPage() {
                 badgeStyle = comingSoonBadge;
               } else if (isEssentials) {
                 if (essentialsSlugs.length === 0) {
-                  // No essentials-* challenges found → don’t invent progress
                   badgeText = 'LIVE';
                   badgeStyle = liveBadge;
                 } else if (essentialsAllCompleteAndApproved) {
@@ -466,9 +478,7 @@ export default function ChallengesMenuPage() {
           </div>
 
           {collectionsLoading && (
-            <p style={{ textAlign: 'center', color: '#94a3b8', marginTop: 12 }}>
-              Loading collections…
-            </p>
+            <p style={{ textAlign: 'center', color: '#94a3b8', marginTop: 12 }}>Loading collections…</p>
           )}
         </section>
 

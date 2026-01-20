@@ -1,14 +1,20 @@
-// src/app/challenges/essentials/page.js
+// src/components/CollectionChallengesPage.js
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../../lib/supabaseClient';
-import SignedInAs from '../../../components/SignedInAs';
+import { supabase } from '../lib/supabaseClient';
+import SignedInAs from './SignedInAs';
 
-export default function EssentialsCollectionPage() {
+export default function CollectionChallengesPage({
+  collectionSlug,
+  heading,
+  intro,
+  backHref = '/challenges/menu',
+  backLabel = '← Back to Collections',
+}) {
   const router = useRouter();
 
   const [user, setUser] = useState(null);
@@ -18,7 +24,7 @@ export default function EssentialsCollectionPage() {
   const [isPro, setIsPro] = useState(false);
 
   // Loaded from DB
-  const [essentialsChallenges, setEssentialsChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url }]
+  const [collectionChallenges, setCollectionChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url }]
 
   // portfolio: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
@@ -39,8 +45,11 @@ export default function EssentialsCollectionPage() {
   };
 
   const prettifySlug = (slug) => {
-    // essentials-classic-chignon -> Classic Chignon
-    const raw = (slug || '').replace(/^essentials-/, '');
+    const raw = (slug || '')
+      .replace(/^essentials-/, '')
+      .replace(/^starter-/, '')
+      .replace(/^red-carpet-/, '')
+      .replace(/^essential-bridal-/, '');
     return raw
       .split('-')
       .filter(Boolean)
@@ -55,28 +64,27 @@ export default function EssentialsCollectionPage() {
 
     // Supabase public storage URLs stored as "/storage/v1/object/public/..."
     if (u.startsWith('/storage/')) {
-      if (!SUPABASE_URL) return u; // will fail, but avoids crashing if env missing
+      if (!SUPABASE_URL) return u;
       return `${SUPABASE_URL}${u}`;
     }
 
-    // Next.js public/ paths (e.g. "/style_one/finished_reference.jpeg")
+    // Next.js public/ paths
     if (u.startsWith('/')) return u;
 
     return u;
   };
 
   const styles = useMemo(() => {
-    return (essentialsChallenges || []).map((c, idx) => ({
+    return (collectionChallenges || []).map((c, idx) => ({
       number: idx + 1,
       slug: c.slug,
       title: prettifySlug(c.slug),
-      isLive: true,
       thumbSrc: resolveAssetUrl(c.thumbnail_url),
       launchHref: `/challenges/${c.slug}/step1`,
       requiredSteps: Array.isArray(c.steps) ? c.steps.length : 4,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [essentialsChallenges, SUPABASE_URL]);
+  }, [collectionChallenges, SUPABASE_URL]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,14 +100,14 @@ export default function EssentialsCollectionPage() {
 
         const sessionUser = sessionData?.session?.user || null;
         if (!sessionUser) {
-          router.replace(`/welcome-back?next=${encodeURIComponent('/challenges/essentials')}`);
+          router.replace(`/welcome-back?next=${encodeURIComponent(`/challenges/${collectionSlug}`)}`);
           return;
         }
 
         if (cancelled) return;
         setUser(sessionUser);
 
-        // 2) Entitlement
+        // 2) Entitlement (Pro)
         const { data: entRows, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
@@ -109,22 +117,23 @@ export default function EssentialsCollectionPage() {
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
-        // 3) Load Essentials challenges from DB
+        // 3) Load challenges for THIS collection (DB-driven)
+        // Uses public.challenges.collection_slug (verified via your SQL: none null)
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug, steps, sort_order, thumbnail_url')
-          .like('slug', 'essentials-%')
+          .select('id, slug, steps, sort_order, thumbnail_url, collection_slug')
+          .eq('collection_slug', collectionSlug)
           .order('sort_order', { ascending: true });
 
         if (chErr) throw chErr;
 
-        const essentials = (chRows || []).filter((c) => c?.id && c?.slug);
-        if (!cancelled) setEssentialsChallenges(essentials);
+        const items = (chRows || []).filter((c) => c?.id && c?.slug);
+        if (!cancelled) setCollectionChallenges(items);
 
         // Build id->slug and required steps maps for portfolio computation
         const idToSlug = new Map();
         const requiredBySlug = {};
-        essentials.forEach((c) => {
+        items.forEach((c) => {
           idToSlug.set(c.id, c.slug);
           requiredBySlug[c.slug] = Array.isArray(c.steps) ? c.steps.length : 4;
         });
@@ -140,17 +149,16 @@ export default function EssentialsCollectionPage() {
         const stepsBySlug = new Map();
         for (const row of uploadRows || []) {
           const slug = idToSlug.get(row.challenge_id);
-          if (!slug) continue; // ignore non-essentials uploads
+          if (!slug) continue; // ignore uploads from other collections
           if (!stepsBySlug.has(slug)) stepsBySlug.set(slug, new Set());
           stepsBySlug.get(slug).add(row.step_number);
         }
 
         const portfolioBySlug = {};
-        essentials.forEach((c) => {
+        items.forEach((c) => {
           const slug = c.slug;
           const count = stepsBySlug.get(slug)?.size || 0;
           const required = requiredBySlug[slug] ?? 4;
-
           portfolioBySlug[slug] =
             count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
         });
@@ -158,7 +166,7 @@ export default function EssentialsCollectionPage() {
         if (!cancelled) setPortfolioStatus(portfolioBySlug);
 
         // 5) Certificate status from submissions
-        // IMPORTANT: key by challenge_id (source of truth), not challenge_slug (may be null/not populated)
+        // Key by challenge_id first; fall back to challenge_slug if needed
         const { data: submissionRows, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_id, challenge_slug, status, submitted_at, reviewed_at')
@@ -169,21 +177,21 @@ export default function EssentialsCollectionPage() {
         const rowsBySlug = new Map();
         for (const r of submissionRows || []) {
           const slugFromId = r?.challenge_id ? idToSlug.get(r.challenge_id) : null;
-          const slug = slugFromId || r?.challenge_slug; // fallback only
+          const slug = slugFromId || r?.challenge_slug;
           if (!slug) continue;
           if (!rowsBySlug.has(slug)) rowsBySlug.set(slug, []);
           rowsBySlug.get(slug).push(r);
         }
 
         const certBySlug = {};
-        essentials.forEach((c) => {
+        items.forEach((c) => {
           certBySlug[c.slug] = getCertificateStateFromRows(rowsBySlug.get(c.slug) || []);
         });
 
         if (!cancelled) setCertificateStatus(certBySlug);
       } catch (e) {
-        console.error('[essentials] load error:', e);
-        if (!cancelled) setError('Something went wrong loading Essentials.');
+        console.error(`[collection:${collectionSlug}] load error:`, e);
+        if (!cancelled) setError('Something went wrong loading this collection.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -193,12 +201,11 @@ export default function EssentialsCollectionPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, collectionSlug]);
 
   const portfolioPill = (slug) => {
     const state = portfolioStatus[slug] || 'not-started';
     return {
-      state,
       style:
         state === 'complete'
           ? statusPillComplete
@@ -217,7 +224,6 @@ export default function EssentialsCollectionPage() {
   const certificatePill = (slug) => {
     const state = certificateStatus[slug] || 'not-submitted';
     return {
-      state,
       style:
         state === 'approved'
           ? statusPillComplete
@@ -240,7 +246,7 @@ export default function EssentialsCollectionPage() {
   if (loading) {
     return (
       <main style={loadingShell}>
-        <p>Loading Essentials…</p>
+        <p>Loading…</p>
       </main>
     );
   }
@@ -279,18 +285,18 @@ export default function EssentialsCollectionPage() {
         {/* Title */}
         <section style={{ textAlign: 'center', maxWidth: 760, margin: '0 auto 1rem' }}>
           <h1 style={{ fontSize: '1.85rem', fontWeight: 700, color: '#f9fafb' }}>
-            Patrick Cameron Essentials
+            {heading || 'Collection'}
           </h1>
-          <p style={{ margin: '0.4rem 0 0', color: '#e5e7eb', lineHeight: 1.6 }}>
-            A focused set of essential salon styles. Track your progress and launch each style from here.
-          </p>
+          {intro ? (
+            <p style={{ margin: '0.4rem 0 0', color: '#e5e7eb', lineHeight: 1.6 }}>{intro}</p>
+          ) : null}
         </section>
 
         {!isPro && (
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
               <div style={{ color: '#e5e7eb', fontSize: '0.92rem' }}>
-                You can browse the Essentials collection, but you’ll need to unlock Pro to launch Essentials styles and submit for certification.
+                You can browse this collection, but you’ll need to unlock Pro to launch styles and submit for certification.
               </div>
               <div style={{ marginTop: 12 }}>
                 <Link href="/challenges/redeem" style={redeemButton}>
@@ -352,8 +358,8 @@ export default function EssentialsCollectionPage() {
           </div>
 
           <div style={{ marginTop: 18, textAlign: 'center' }}>
-            <Link href="/challenges/menu" style={backButton}>
-              ← Back to Collections
+            <Link href={backHref} style={backButton}>
+              {backLabel}
             </Link>
           </div>
 
