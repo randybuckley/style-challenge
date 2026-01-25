@@ -35,6 +35,15 @@ function ChallengeStep1Page() {
 
   const challengeId = challenge?.id || null
 
+  // ✅ Helper: preserve where the user was trying to go
+  // so permissions can send them back correctly.
+  const buildReturnToHerePath = () => {
+    if (typeof window === 'undefined') return ''
+    const path = window.location.pathname || ''
+    const qs = window.location.search || ''
+    return `${path}${qs}`
+  }
+
   // -------- Load challenge metadata by slug --------
   useEffect(() => {
     if (!slug) return
@@ -125,9 +134,12 @@ function ChallengeStep1Page() {
 
         const consent = profile?.media_consent
 
-        // If media_consent is null/undefined → send to permissions page
+        // If media_consent is null/undefined → send to permissions page,
+        // BUT preserve where the user was trying to go.
         if (consent === null || typeof consent === 'undefined') {
-          router.push('/challenge/permissions')
+          const returnTo = buildReturnToHerePath()
+          const nextParam = returnTo ? `?next=${encodeURIComponent(returnTo)}` : ''
+          router.push(`/challenge/permissions${nextParam}`)
           return
         }
       }
