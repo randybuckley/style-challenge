@@ -161,7 +161,10 @@ function ChallengesLoginInner() {
           lineHeight: 1.4,
         }}
       >
-        If you are an Access Long Hair subscriber, sign in with the same email you used for your subscription.
+        If you’re an Access Long Hair subscriber, sign in using the same email you used for your subscription.
+        <br />
+        If not, you can still sign in to explore the Style Challenge.
+        <br />
         <br />
         We’ll send you a secure, single-use magic link.
       </p>
@@ -216,10 +219,6 @@ function ChallengesLoginInner() {
         >
           {submitting ? 'Sending…' : 'Send Magic Link'}
         </button>
-
-        <p style={{ marginTop: 8, color: '#888', fontSize: '0.9rem', maxWidth: 520 }}>
-          Tip: if you don’t see the email, check spam/junk and search for “Supabase”.
-        </p>
       </form>
 
       {message && (

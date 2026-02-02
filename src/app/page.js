@@ -155,10 +155,14 @@ export default function HomePage() {
       <h1 style={{ fontSize: '1.8rem', fontWeight: 600, marginBottom: '0.75rem' }}>
         Welcome to the Style Challenge
       </h1>
-      <p style={{ maxWidth: 420, marginBottom: '1.5rem', color: '#ccc', fontSize: '1rem' }}>
-        Log in to start your styling journey.
+
+      <p style={{ maxWidth: 520, marginBottom: '1.5rem', color: '#ccc', fontSize: '1rem', lineHeight: 1.4 }}>
+        If you’re an Access Long Hair subscriber, sign in using the same email you used for your subscription.
         <br />
-        Magic links are single-use for your security.
+        If not, you can still sign in to explore the Style Challenge.
+        <br />
+        <br />
+        We’ll send you a secure, single-use magic link.
       </p>
 
       {!user ? (
