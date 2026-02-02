@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
+import { isInAppBrowser, getOpenInBrowserInstructions } from '@/lib/inAppBrowser'
 
 export default function HomePage() {
   const router = useRouter()
@@ -15,9 +16,20 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  const [showInAppWarning, setShowInAppWarning] = useState(false)
+  const [copied, setCopied] = useState(false)
+
   useEffect(() => {
     let active = true
     setMounted(true)
+
+    // In-app browser warning (camera/uploads can break)
+    try {
+      const ua = navigator.userAgent || ''
+      setShowInAppWarning(isInAppBrowser(ua))
+    } catch {
+      setShowInAppWarning(false)
+    }
 
     // If already logged in, send to Pro menu
     supabase.auth.getSession().then(({ data }) => {
@@ -33,6 +45,22 @@ export default function HomePage() {
       active = false
     }
   }, [router])
+
+  const handleCopyLink = async () => {
+    const url = typeof window !== 'undefined' ? window.location.href : ''
+    if (!url) return
+
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Fallback: prompt copy
+      try {
+        window.prompt('Copy this link:', url)
+      } catch {}
+    }
+  }
 
   const handleMagicLink = async (e) => {
     e.preventDefault()
@@ -75,7 +103,7 @@ export default function HomePage() {
       setMessage(
         error
           ? `❌ Login failed: ${error.message}`
-          : '📧 Check your email for a fresh login link. (Magic links are single-use.)'
+          : '📧 Check your email for a secure sign-in link. (Magic links are single-use.)'
       )
     } catch (err) {
       console.error(err)
@@ -102,6 +130,61 @@ export default function HomePage() {
         padding: '2rem 1rem',
       }}
     >
+      {showInAppWarning && (
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 680,
+            border: '1px solid #444',
+            background: '#111',
+            padding: '0.9rem 1rem',
+            borderRadius: 8,
+            marginBottom: '1.25rem',
+            boxShadow: '0 6px 16px rgba(0,0,0,0.35)',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Open in Safari / Chrome for best results</div>
+          <div style={{ color: '#ccc', fontSize: '0.95rem', lineHeight: 1.4 }}>
+            Some in-app browsers (Facebook, Yahoo, etc.) can block camera and uploads.
+            <br />
+            {getOpenInBrowserInstructions()}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              style={{
+                padding: '0.55rem 0.9rem',
+                background: '#2b2b2b',
+                border: '1px solid #555',
+                borderRadius: 6,
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              {copied ? '✅ Link copied' : 'Copy this link'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInAppWarning(false)}
+              style={{
+                padding: '0.55rem 0.9rem',
+                background: 'transparent',
+                border: '1px solid #555',
+                borderRadius: 6,
+                color: '#ccc',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <div
@@ -156,7 +239,7 @@ export default function HomePage() {
         Welcome to the Style Challenge
       </h1>
 
-      <p style={{ maxWidth: 520, marginBottom: '1.5rem', color: '#ccc', fontSize: '1rem', lineHeight: 1.4 }}>
+      <p style={{ maxWidth: 520, marginBottom: '1.5rem', color: '#ccc', fontSize: '1rem', lineHeight: 1.45 }}>
         If you’re an Access Long Hair subscriber, sign in using the same email you used for your subscription.
         <br />
         If not, you can still sign in to explore the Style Challenge.
@@ -224,7 +307,7 @@ export default function HomePage() {
       )}
 
       {message && (
-        <p style={{ fontSize: '0.95rem', color: '#ccc', marginTop: '1rem', maxWidth: 420 }}>
+        <p style={{ fontSize: '0.95rem', color: '#ccc', marginTop: '1rem', maxWidth: 520 }}>
           {message}
         </p>
       )}
