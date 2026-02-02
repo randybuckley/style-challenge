@@ -3,12 +3,11 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import Image from 'next/image'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 
 function ChallengesLoginInner() {
   const router = useRouter()
-  const searchParams = useSearchParams()
 
   const [email, setEmail] = useState('')
   const [message, setMessage] = useState('')
@@ -71,7 +70,7 @@ function ChallengesLoginInner() {
       setMessage(
         error
           ? `Couldn’t send link: ${error.message}`
-          : 'Check your email for your sign-in link. Open it on this device.'
+          : 'Check your email for your sign-in link. Open it on this device. (Magic links are single-use.)'
       )
     } catch (err) {
       console.error(err)
@@ -162,9 +161,9 @@ function ChallengesLoginInner() {
           lineHeight: 1.4,
         }}
       >
-        Enter your email to receive a secure sign-in link and access your collections.
+        If you are an Access Long Hair subscriber, sign in with the same email you used for your subscription.
         <br />
-        Magic links are single-use for your security.
+        We’ll send you a secure, single-use magic link.
       </p>
 
       {/* Login form */}
@@ -217,6 +216,10 @@ function ChallengesLoginInner() {
         >
           {submitting ? 'Sending…' : 'Send Magic Link'}
         </button>
+
+        <p style={{ marginTop: 8, color: '#888', fontSize: '0.9rem', maxWidth: 520 }}>
+          Tip: if you don’t see the email, check spam/junk and search for “Supabase”.
+        </p>
       </form>
 
       {message && (
