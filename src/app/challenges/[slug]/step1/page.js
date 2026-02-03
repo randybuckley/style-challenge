@@ -1,12 +1,65 @@
 'use client'
 /* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useCallback } from 'react'
 import Image from 'next/image'
+import Cropper from 'react-easy-crop'
 import { supabase } from '../../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../../lib/uploadPath'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 
+// -------------------- Crop helpers --------------------
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.addEventListener('load', () => resolve(image))
+    image.addEventListener('error', (err) => reject(err))
+    image.setAttribute('crossOrigin', 'anonymous')
+    image.src = url
+  })
+}
+
+async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = {}) {
+  const image = await createImage(imageSrc)
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context not available')
+
+  const { width, height, x, y } = croppedAreaPixels
+
+  canvas.width = Math.max(1, Math.floor(width))
+  canvas.height = Math.max(1, Math.floor(height))
+
+  ctx.drawImage(
+    image,
+    x,
+    y,
+    width,
+    height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  )
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return reject(new Error('Image crop failed (no blob).'))
+        resolve(blob)
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+function guessFileName(originalName = 'photo.jpg') {
+  const base = originalName.replace(/\.[^/.]+$/, '')
+  return `${base}_cropped.jpg`
+}
+
+// -------------------- Page --------------------
 function ChallengeStep1Page() {
   const params = useParams()
   const slugParam = params?.slug
@@ -27,6 +80,15 @@ function ChallengeStep1Page() {
   const [uploading, setUploading] = useState(false)
   const [navigating, setNavigating] = useState(false)
 
+  // ✅ Cropper state
+  const [isCropOpen, setIsCropOpen] = useState(false)
+  const [rawSelectedUrl, setRawSelectedUrl] = useState('') // original selected image URL (object URL)
+  const [rawSelectedName, setRawSelectedName] = useState('photo.jpg')
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [cropping, setCropping] = useState(false)
+
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -36,7 +98,6 @@ function ChallengeStep1Page() {
   const challengeId = challenge?.id || null
 
   // ✅ Helper: preserve where the user was trying to go
-  // so permissions can send them back correctly.
   const buildReturnToHerePath = () => {
     if (typeof window === 'undefined') return ''
     const path = window.location.pathname || ''
@@ -57,7 +118,6 @@ function ChallengeStep1Page() {
         steps: [
           {
             stepNumber: 1,
-            // Keeping this in case you still want it in the JSON, but we won't render video in demo.
             videoUrl: '/demo/video/step_1.mp4',
             referenceImageUrl: '/demo/images/step1_reference.jpeg',
           },
@@ -188,20 +248,81 @@ function ChallengeStep1Page() {
     }
   }, [user, adminDemo, demo, challengeId])
 
-  const handleFileChange = (fileObj) => {
-    setFile(fileObj || null)
-    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
-    setUploadMessage('')
+  // ✅ Crop callbacks
+  const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels)
+  }, [])
+
+  const openCropperForFile = (fileObj) => {
+    if (!fileObj) return
+    const objUrl = URL.createObjectURL(fileObj)
+    setRawSelectedUrl(objUrl)
+    setRawSelectedName(fileObj.name || 'photo.jpg')
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
+    setIsCropOpen(true)
   }
 
-  // Revoke object URL on unmount
+  const handleFileChange = (fileObj) => {
+    setUploadMessage('')
+    setShowOptions(false)
+
+    if (!fileObj) {
+      setFile(null)
+      setPreviewUrl('')
+      return
+    }
+
+    // We don’t immediately set `file`/`previewUrl` as final.
+    // We open cropper first; on "Use this crop" we’ll set the final `file`.
+    openCropperForFile(fileObj)
+  }
+
+  const confirmCrop = async () => {
+    if (!rawSelectedUrl || !croppedAreaPixels) {
+      setIsCropOpen(false)
+      return
+    }
+
+    try {
+      setCropping(true)
+
+      const blob = await getCroppedBlob(rawSelectedUrl, croppedAreaPixels, {
+        quality: 0.92,
+      })
+
+      const croppedFile = new File([blob], guessFileName(rawSelectedName), {
+        type: 'image/jpeg',
+      })
+
+      // Replace any previous preview URL
+      setFile(croppedFile)
+      const newPreview = URL.createObjectURL(croppedFile)
+      setPreviewUrl(newPreview)
+      setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
+      setIsCropOpen(false)
+    } catch (err) {
+      console.error(err)
+      setUploadMessage('❌ Could not crop that image. Please try again.')
+      setIsCropOpen(false)
+    } finally {
+      setCropping(false)
+    }
+  }
+
+  const cancelCrop = () => {
+    setIsCropOpen(false)
+  }
+
+  // Revoke object URLs on unmount / change
   useEffect(() => {
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl)
-      }
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (rawSelectedUrl) URL.revokeObjectURL(rawSelectedUrl)
     }
-  }, [previewUrl])
+    // Intentionally include both, so we always clean up the latest object URLs.
+  }, [previewUrl, rawSelectedUrl])
 
   // -------- Derive Step 1 assets from challenge JSON --------
   const stepConfig = (() => {
@@ -209,7 +330,6 @@ function ChallengeStep1Page() {
     const steps = Array.isArray(challenge.steps) ? challenge.steps : []
     if (!steps.length) return null
 
-    // ✅ stepNumber is often stored as a string in JSONB ("1"), so normalize it.
     const byNumber = steps.find((s) => Number(s.stepNumber) === 1)
     return byNumber || steps[0]
   })()
@@ -218,21 +338,16 @@ function ChallengeStep1Page() {
     stepConfig?.videoUrl ||
     'https://player.vimeo.com/video/1138763970?badge=0&autopause=0&player_id=0&app_id=58479'
 
-  // Raw value from DB (can be /storage/... or full https://... or /public/... fallback)
   const referenceImageUrlRaw =
     stepConfig?.referenceImageUrl || '/style_one/step1_reference.jpeg'
 
-  // ✅ If DB stores /storage/... paths, prefix with Supabase project URL so the browser loads it correctly.
   const referenceImageUrl =
     typeof referenceImageUrlRaw === 'string' &&
     referenceImageUrlRaw.startsWith('/storage/')
       ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}${referenceImageUrlRaw}`
       : referenceImageUrlRaw
 
-  // ✅ DEMO "Your Version" image (you created these)
   const demoYourImageUrl = '/demo/images/stylist_step1_reference.jpeg'
-
-  // ✅ DEMO video placeholder image (you created these)
   const demoVideoPlaceholderUrl = '/demo/images/video_placeholder_step1.jpeg'
 
   // -------- Upload handler --------
@@ -247,7 +362,6 @@ function ChallengeStep1Page() {
       return
     }
 
-    // If we somehow have no challenge loaded, block upload
     if (!challengeId && !adminDemo) {
       setUploadMessage(
         'There was a problem loading this challenge. Please try again.'
@@ -255,27 +369,23 @@ function ChallengeStep1Page() {
       return
     }
 
-    // Demo mode shortcut: use existing image if there is one
     if (adminDemo && !file && imageUrl) {
       setUploadMessage('✅ Demo mode: using your existing photo.')
       setShowOptions(true)
       return
     }
 
-    // No new file and no existing image → block
     if (!file && !imageUrl) {
       setUploadMessage('Please select a photo first.')
       return
     }
 
-    // No new file, but existing image → just confirm
     if (!file && imageUrl) {
       setUploadMessage('✅ Using your existing photo for Step 1.')
       setShowOptions(true)
       return
     }
 
-    // New file but no valid session (outside demo) → block
     if (!user && !adminDemo) {
       setUploadMessage(
         'There was a problem with your session. Please sign in again.'
@@ -343,7 +453,6 @@ function ChallengeStep1Page() {
     if (navigating) return
     setNavigating(true)
 
-    // ✅ Preserve existing admin_demo; add demo query when present
     const qs = []
     if (adminDemo) qs.push('admin_demo=true')
     if (demo) qs.push('demo=1')
@@ -352,7 +461,6 @@ function ChallengeStep1Page() {
     router.push('/challenges/' + slug + '/step2' + suffix)
   }
 
-  // Combined loading state
   if (loadingUser || loadingChallenge || !slug) {
     return <p>Loading challenge step 1…</p>
   }
@@ -411,7 +519,6 @@ function ChallengeStep1Page() {
     border: '3px solid rgba(255, 255, 255, 0.9)',
   }
 
-  // --- Demo placeholder container formatting (same pattern as landing page) ---
   const placeholderFrame = {
     background: '#fff',
     borderRadius: 12,
@@ -466,6 +573,129 @@ function ChallengeStep1Page() {
         minHeight: '100vh',
       }}
     >
+      {/* ✅ Crop modal */}
+      {isCropOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.82)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              background: '#111',
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.12)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
+            }}
+          >
+            <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
+              <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
+                Drag to centre. Pinch or use the slider to zoom until the style fills the oval guide.
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', width: '100%', height: 420, background: '#000' }}>
+              <Cropper
+                image={rawSelectedUrl}
+                crop={crop}
+                zoom={zoom}
+                aspect={3 / 4}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+                restrictPosition={false}
+                objectFit="cover"
+              />
+
+              {/* Oval guide overlay (visual only) */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '78%',
+                    height: '74%',
+                    borderRadius: '50%',
+                    border: '3px solid rgba(255,255,255,0.9)',
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.01"
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  style={{ width: '70%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+                <button
+                  onClick={cancelCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: '#000',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={confirmCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1.2,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: '#28a745',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                    opacity: cropping ? 0.85 : 1,
+                  }}
+                >
+                  {cropping ? 'Saving…' : 'Use this crop'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Image
@@ -598,6 +828,7 @@ function ChallengeStep1Page() {
           <p>
             <strong>Your Version</strong>
           </p>
+
           <div style={overlayFrame}>
             {hasImage ? (
               <img
@@ -636,6 +867,35 @@ function ChallengeStep1Page() {
               </div>
             )}
           </div>
+
+          {/* ✅ Quick adjust button (only when a new file is selected/cropped preview exists) */}
+          {!!previewUrl && !demo && !adminDemo && !showOptions && (
+            <button
+              type="button"
+              onClick={() => {
+                // Re-open cropper using the already-cropped preview as the source
+                // (so users can iterate without re-selecting)
+                setRawSelectedUrl(previewUrl)
+                setRawSelectedName(file?.name || 'photo.jpg')
+                setCrop({ x: 0, y: 0 })
+                setZoom(1)
+                setCroppedAreaPixels(null)
+                setIsCropOpen(true)
+              }}
+              style={{
+                marginTop: 12,
+                padding: '0.6rem 1rem',
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: '#111',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Adjust crop
+            </button>
+          )}
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
