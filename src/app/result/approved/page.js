@@ -14,51 +14,72 @@ function ApprovedResultInner() {
   const [busy, setBusy] = useState(false)
   const [downloaded, setDownloaded] = useState(false)
 
-  async function handleCertificateClick() {
+  const [emailBusy, setEmailBusy] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailError, setEmailError] = useState('')
+
+  // Cache certificate metadata so download/email can share it without refetching
+  const [metaCache, setMetaCache] = useState(null)
+
+  async function fetchCertificateMeta() {
     if (!token) {
       alert('Sorry, we could not find your approval token.')
-      return
+      return null
     }
     if (!userEmail) {
       alert('Sorry, we are missing your email address for this certificate link.')
-      return
+      return null
     }
 
+    const metaRes = await fetch('/api/review-certification', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ token, userEmail }),
+    })
+
+    if (!metaRes.ok) {
+      const text = await metaRes.text().catch(() => '')
+      console.error('Metadata error:', metaRes.status, text)
+      alert(
+        'Sorry, we could not prepare your certificate details.\n\n' +
+          (text || `Status: ${metaRes.status}`)
+      )
+      return null
+    }
+
+    const meta = await metaRes.json()
+    if (!meta || meta.ok === false) {
+      console.error('Metadata payload error:', meta)
+      alert(
+        'Sorry, we could not prepare your certificate details.\n\n' +
+          (meta?.error || 'Unknown metadata error')
+      )
+      return null
+    }
+
+    // Ensure email is present for downstream routes (email route requires it)
+    const metaWithEmail = {
+      ...meta,
+      email: meta.email || userEmail,
+    }
+
+    setMetaCache(metaWithEmail)
+    return metaWithEmail
+  }
+
+  async function handleCertificateClick() {
     setBusy(true)
     setDownloaded(false)
 
     try {
-      // 1) Fetch certificate metadata from our API
-      const metaRes = await fetch('/api/review-certification', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ token, userEmail }),
-      })
+      // 1) Fetch certificate metadata from our API (or cache)
+      const meta = metaCache || (await fetchCertificateMeta())
+      if (!meta) return
 
-      if (!metaRes.ok) {
-        const text = await metaRes.text().catch(() => '')
-        console.error('Metadata error:', metaRes.status, text)
-        alert(
-          'Sorry, we could not prepare your certificate details.\n\n' +
-            (text || `Status: ${metaRes.status}`)
-        )
-        return
-      }
-
-      const meta = await metaRes.json()
-      if (!meta || meta.ok === false) {
-        console.error('Metadata payload error:', meta)
-        alert(
-          'Sorry, we could not prepare your certificate details.\n\n' +
-            (meta?.error || 'Unknown metadata error')
-        )
-        return
-      }
-
-      // 2) Ask the server to generate the PDF
+      // 2) Ask the server to generate the PDF (keep existing route unchanged)
       const pdfRes = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -108,6 +129,55 @@ function ApprovedResultInner() {
       )
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleEmailCertificateClick() {
+    setEmailBusy(true)
+    setEmailSent(false)
+    setEmailError('')
+
+    try {
+      // Reuse cached meta if available
+      const meta = metaCache || (await fetchCertificateMeta())
+      if (!meta) return
+
+      const res = await fetch('/api/certificates/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          stylistName: meta.stylistName,
+          salonName: meta.salonName,
+          styleName: meta.styleName,
+          date: meta.date,
+          certificateId: meta.certificateId,
+          email: meta.email || userEmail,
+          watermark: meta.watermark || 'PC',
+        }),
+      })
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        console.error('Email certificate error:', res.status, text)
+        setEmailError(text || `Status: ${res.status}`)
+        return
+      }
+
+      const payload = await res.json().catch(() => ({}))
+      if (payload?.ok === false) {
+        setEmailError(payload?.error || 'Unknown error sending email.')
+        return
+      }
+
+      setEmailSent(true)
+    } catch (err) {
+      console.error('Unexpected error while emailing certificate:', err)
+      setEmailError(err?.message || String(err))
+    } finally {
+      setEmailBusy(false)
     }
   }
 
@@ -177,6 +247,26 @@ function ApprovedResultInner() {
     minWidth: 220,
   }
 
+  const btnSecondary = {
+    marginTop: 10,
+    background: '#101010',
+    color: '#eaeaea',
+    border: '1px solid #2b2b2b',
+    borderRadius: 10,
+    padding: '12px 18px',
+    fontWeight: 800,
+    cursor: emailBusy ? 'default' : 'pointer',
+    opacity: emailBusy ? 0.7 : 1,
+    boxShadow: '0 10px 22px rgba(0,0,0,.18)',
+    minWidth: 220,
+  }
+
+  const smallHelper = {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#bdbdbd',
+  }
+
   const navRow = {
     marginTop: 12,
     display: 'flex',
@@ -237,6 +327,19 @@ function ApprovedResultInner() {
     color: '#9fe6b0',
   }
 
+  const emailOkNote = {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#9fd6ff',
+  }
+
+  const emailErrNote = {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#ffb3b3',
+    whiteSpace: 'pre-wrap',
+  }
+
   return (
     <main style={pageShell}>
       {/* Logo header */}
@@ -286,9 +389,34 @@ function ApprovedResultInner() {
           </div>
         </div>
 
-        <button type="button" onClick={handleCertificateClick} disabled={busy} style={btn}>
+        <button type="button" onClick={handleCertificateClick} disabled={busy || emailBusy} style={btn}>
           {busy ? 'Preparing your certificate…' : 'Download your certificate'}
         </button>
+
+        <div style={smallHelper}>Not downloaded? We can email it to you as a PDF attachment.</div>
+
+        <button
+          type="button"
+          onClick={handleEmailCertificateClick}
+          disabled={busy || emailBusy}
+          style={btnSecondary}
+        >
+          {emailBusy ? 'Emailing your certificate…' : 'Email my certificate'}
+        </button>
+
+        {emailSent ? (
+          <div style={emailOkNote}>
+            Sent. Check your inbox for your certificate PDF.
+          </div>
+        ) : null}
+
+        {emailError ? (
+          <div style={emailErrNote}>
+            Sorry — we couldn’t email your certificate.
+            {'\n'}
+            {emailError}
+          </div>
+        ) : null}
 
         {downloaded ? (
           <div style={downloadedNote}>
