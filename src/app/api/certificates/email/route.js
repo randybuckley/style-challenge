@@ -1,7 +1,5 @@
+// src/app/api/certificates/email/route.js
 import { NextResponse } from 'next/server'
-import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib'
-import { readFile } from 'fs/promises'
-import path from 'path'
 import sgMail from '@sendgrid/mail'
 
 export const dynamic = 'force-dynamic'
@@ -18,13 +16,13 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
 
-    const stylistName   = safe(body.stylistName)
-    const salonName     = safe(body.salonName)
-    const styleName     = safe(body.styleName)
-    const date          = safe(body.date)
+    const stylistName = safe(body.stylistName)
+    const salonName = safe(body.salonName)
+    const styleName = safe(body.styleName)
+    const date = safe(body.date)
     const certificateId = safe(body.certificateId)
-    const email         = safe(body.email)
-    const watermark     = safe(body.watermark || 'PC')
+    const email = safe(body.email)
+    const watermark = safe(body.watermark || 'PC')
 
     if (!stylistName || !styleName || !date || !certificateId || !email) {
       return NextResponse.json(
@@ -33,105 +31,106 @@ export async function POST(req) {
       )
     }
 
-    // --- Generate PDF (same logic as /generate) ---
-    const pdf = await PDFDocument.create()
-    const page = pdf.addPage([842, 595])
-    const { width, height } = page.getSize()
-    const margin = 40
-    const black = rgb(0, 0, 0)
+    // Robust origin derivation (works locally + on Vercel)
+    const origin = new URL(req.url).origin
 
-    const serif = await pdf.embedFont(StandardFonts.TimesRoman)
-    const serifBold = await pdf.embedFont(StandardFonts.TimesRomanBold)
+    // Public logo URL (served from /public/logo.jpeg)
+    const logoUrl = `${origin}/logo.jpeg`
 
-    const tw = (text, size, font) => font.widthOfTextAtSize(text, size)
-    const cx = (text, size, font) => (width - tw(text, size, font)) / 2
-
-    page.drawText(watermark, {
-      x: width / 2 - 140,
-      y: height / 2 - 80,
-      size: 140,
-      font: serifBold,
-      color: black,
-      opacity: 0.06,
-      rotate: degrees(-18)
+    // Call the SAME PDF generator used by the Approved download flow
+    const pdfRes = await fetch(`${origin}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/pdf',
+      },
+      body: JSON.stringify({
+        stylistName,
+        salonName,
+        styleName,
+        date,
+        certificateId,
+        email,
+        watermark,
+      }),
+      cache: 'no-store',
     })
 
-    const h1 = 'PATRICK CAMERON LONG HAIR ACADEMY'
-    const h2 = 'CERTIFICATE OF ACHIEVEMENT'
-
-    page.drawText(h1, { x: cx(h1, 20, serifBold), y: height - 60, size: 20, font: serifBold })
-    page.drawText(h2, { x: cx(h2, 28, serifBold), y: height - 120, size: 28, font: serifBold })
-
-    page.drawLine({
-      start: { x: margin, y: height - 90 },
-      end: { x: width - margin, y: height - 90 },
-      thickness: 1,
-      color: black
-    })
-
-    let y = height - 190
-    page.drawText('This certifies that', { x: cx('This certifies that', 14, serif), y, size: 14, font: serif })
-    y -= 26
-
-    page.drawText(stylistName.toUpperCase(), {
-      x: cx(stylistName.toUpperCase(), 26, serifBold),
-      y,
-      size: 26,
-      font: serifBold
-    })
-    y -= 30
-
-    if (salonName) {
-      const l2 = `of ${salonName}`
-      page.drawText(l2, { x: cx(l2, 14, serif), y, size: 14, font: serif })
-      y -= 24
+    if (!pdfRes.ok) {
+      const text = await pdfRes.text().catch(() => '')
+      console.error('Email route: PDF generation failed:', pdfRes.status, text)
+      return NextResponse.json(
+        { ok: false, error: text || `PDF generation failed (status ${pdfRes.status})` },
+        { status: 500 }
+      )
     }
 
-    const l3 = `has successfully completed the Style Challenge: ${styleName}`
-    page.drawText(l3, { x: cx(l3, 14, serif), y, size: 14, font: serif })
+    const pdfArrayBuffer = await pdfRes.arrayBuffer()
+    const base64Pdf = Buffer.from(pdfArrayBuffer).toString('base64')
 
-    page.drawLine({
-      start: { x: margin, y: 120 },
-      end: { x: width - margin, y: 120 },
-      thickness: 1,
-      color: black
-    })
+    const subject = 'Congratulations — here is your Style Challenge certificate'
 
-    const asset = (p) => path.join(process.cwd(), 'public', 'cert', p)
+    const greetingName = stylistName || 'Stylist'
+    const salonLine = salonName ? ` (${salonName})` : ''
 
-    try {
-      const buf = await readFile(asset('signature.png'))
-      const img = await pdf.embedPng(buf)
-      const w = 180
-      const h = (img.height / img.width) * w
-      page.drawImage(img, { x: width - margin - w, y: 40, width: w, height: h })
-    } catch {}
+    const textCopy =
+      `Congratulations, ${greetingName}${salonLine}!\n\n` +
+      `You have successfully completed the Style Challenge: ${styleName}.\n\n` +
+      `Attached is your certificate (Certificate No. ${certificateId}).\n\n` +
+      `Keep building your long-hair artistry — this is just the start.\n\n` +
+      `Patrick Cameron Style Challenge`
 
-    const rx = width - margin - 260
-    page.drawText('Patrick Cameron', { x: rx, y: 92, size: 16, font: serifBold })
-    page.drawText(`Awarded on ${date}`, { x: rx, y: 72, size: 12, font: serif })
-    page.drawText(`Certificate No. ${certificateId}`, { x: rx, y: 54, size: 12, font: serif })
+    const htmlCopy = `
+      <div style="font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:#111; line-height:1.5;">
+        <div style="margin: 0 0 18px 0;">
+          <img src="${logoUrl}" alt="Patrick Cameron" style="width:180px; height:auto; display:block;" />
+        </div>
 
-    const pdfBytes = await pdf.save()
-    const base64Pdf = Buffer.from(pdfBytes).toString('base64')
+        <h2 style="margin: 0 0 10px 0; font-size: 20px;">Congratulations, ${escapeHtml(
+          greetingName
+        )}${salonName ? escapeHtml(salonLine) : ''}!</h2>
 
-    // --- Send email ---
+        <p style="margin: 0 0 12px 0;">
+          You have successfully completed the <strong>Style Challenge: ${escapeHtml(
+            styleName
+          )}</strong>.
+        </p>
+
+        <p style="margin: 0 0 12px 0;">
+          Your certificate is attached to this email.
+          <br />
+          <span style="color:#444;">Certificate No. ${escapeHtml(
+            certificateId
+          )} · Awarded on ${escapeHtml(date)}</span>
+        </p>
+
+        <p style="margin: 18px 0 0 0;">
+          Keep building your long-hair artistry — this is just the start.
+        </p>
+
+        <p style="margin: 18px 0 0 0; color:#444;">
+          — Patrick Cameron Style Challenge
+        </p>
+      </div>
+    `
+
     await sgMail.send({
       to: email,
       from: {
         email: process.env.EMAIL_FROM || 'info@accesslonghair.com',
-        name: 'Patrick Cameron Style Challenge'
+        name: 'Patrick Cameron Style Challenge',
       },
-      subject: 'Your Style Challenge Certificate',
-      text: `Attached is your certificate for ${styleName}.`,
+      subject,
+      text: textCopy,
+      html: htmlCopy,
       attachments: [
         {
           content: base64Pdf,
           filename: `Certificate_${certificateId}.pdf`,
           type: 'application/pdf',
-          disposition: 'attachment'
-        }
-      ]
+          disposition: 'attachment',
+        },
+      ],
     })
 
     return NextResponse.json({ ok: true })
@@ -141,4 +140,14 @@ export async function POST(req) {
       { status: 500 }
     )
   }
+}
+
+// Minimal HTML escaping for dynamic fields in the HTML email
+function escapeHtml(input) {
+  return String(input || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
