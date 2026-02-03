@@ -1,7 +1,7 @@
 // src/app/page.js
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
@@ -19,6 +19,37 @@ export default function HomePage() {
   const [showInAppWarning, setShowInAppWarning] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  // Prevent double work / loops
+  const backfillAttemptedRef = useRef(false)
+  const redirectAttemptedRef = useRef(false)
+
+  const attemptVimeoOttBackfill = async (session) => {
+    if (backfillAttemptedRef.current) return
+    backfillAttemptedRef.current = true
+
+    const accessToken = session?.access_token
+    if (!accessToken) return
+
+    try {
+      await fetch('/api/vimeo-ott/backfill-pro', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      }).catch(() => {})
+    } catch {
+      // Intentionally ignore backfill errors to avoid blocking login UX
+    }
+  }
+
+  const redirectToMenuOnce = () => {
+    if (redirectAttemptedRef.current) return
+    redirectAttemptedRef.current = true
+    router.push('/challenges/menu')
+  }
+
   useEffect(() => {
     let active = true
     setMounted(true)
@@ -31,18 +62,33 @@ export default function HomePage() {
       setShowInAppWarning(false)
     }
 
-    // If already logged in, send to Pro menu
-    supabase.auth.getSession().then(({ data }) => {
+    // If already logged in, backfill PRO (if needed), then send to Pro menu
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
-      const sessionUser = data.session?.user
+      const session = data.session
+      const sessionUser = session?.user
       if (sessionUser) {
         setUser(sessionUser)
-        router.push('/challenges/menu')
+        await attemptVimeoOttBackfill(session)
+        redirectToMenuOnce()
+      }
+    })
+
+    // Also handle first-time SIGNED_IN (magic link)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active) return
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser(session.user)
+        await attemptVimeoOttBackfill(session)
+        redirectToMenuOnce()
       }
     })
 
     return () => {
       active = false
+      subscription?.unsubscribe()
     }
   }, [router])
 

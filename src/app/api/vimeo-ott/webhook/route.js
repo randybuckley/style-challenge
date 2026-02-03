@@ -1,3 +1,4 @@
+// src/app/api/vimeo-ott/webhook/route.js
 export const runtime = 'nodejs';
 
 import { createClient } from '@supabase/supabase-js';
@@ -19,10 +20,16 @@ const supabaseAdmin =
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET, HEAD',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
   };
+}
+
+function checkToken(req) {
+  const url = new URL(req.url);
+  const token = url.searchParams.get('token');
+  return !!TOKEN && token === TOKEN;
 }
 
 function parsePossiblyDoubleEncodedJson(raw) {
@@ -104,11 +111,28 @@ export async function OPTIONS() {
   return new Response('ok', { status: 200, headers: corsHeaders() });
 }
 
-export async function POST(req) {
-  const url = new URL(req.url);
-  const token = url.searchParams.get('token');
+export async function GET(req) {
+  if (!checkToken(req)) {
+    return new Response('unauthorized', {
+      status: 401,
+      headers: corsHeaders(),
+    });
+  }
+  return new Response('ok', { status: 200, headers: corsHeaders() });
+}
 
-  if (!TOKEN || token !== TOKEN) {
+export async function HEAD(req) {
+  if (!checkToken(req)) {
+    return new Response('unauthorized', {
+      status: 401,
+      headers: corsHeaders(),
+    });
+  }
+  return new Response(null, { status: 200, headers: corsHeaders() });
+}
+
+export async function POST(req) {
+  if (!checkToken(req)) {
     return new Response('unauthorized', {
       status: 401,
       headers: corsHeaders(),
