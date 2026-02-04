@@ -1,17 +1,109 @@
 'use client'
 /* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useCallback } from 'react'
 import Image from 'next/image'
+import Cropper from 'react-easy-crop'
 import { supabase } from '../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
 
+// -------------------- Crop + image helpers --------------------
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.addEventListener('load', () => resolve(image))
+    image.addEventListener('error', (err) => reject(err))
+    image.setAttribute('crossOrigin', 'anonymous')
+    image.src = url
+  })
+}
+
+async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = {}) {
+  const image = await createImage(imageSrc)
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context not available')
+
+  const { width, height, x, y } = croppedAreaPixels
+
+  canvas.width = Math.max(1, Math.floor(width))
+  canvas.height = Math.max(1, Math.floor(height))
+
+  ctx.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return reject(new Error('Image crop failed (no blob).'))
+        resolve(blob)
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+// Resize an image Blob (from File/ObjectURL) to a capped long edge.
+// This is the "marketing original": high quality, but not enormous.
+async function getResizedBlob(imageSrc, { maxLongEdge = 2048, quality = 0.9 } = {}) {
+  const image = await createImage(imageSrc)
+
+  const srcW = image.naturalWidth || image.width
+  const srcH = image.naturalHeight || image.height
+  if (!srcW || !srcH) throw new Error('Could not read image dimensions.')
+
+  const longEdge = Math.max(srcW, srcH)
+  const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1
+
+  const outW = Math.max(1, Math.round(srcW * scale))
+  const outH = Math.max(1, Math.round(srcH * scale))
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context not available')
+
+  canvas.width = outW
+  canvas.height = outH
+
+  ctx.drawImage(image, 0, 0, outW, outH)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return reject(new Error('Resize failed (no blob).'))
+        resolve(blob)
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+function guessFileName(originalName = 'photo.jpg') {
+  const base = originalName.replace(/\.[^/.]+$/, '')
+  return `${base}_cropped.jpg`
+}
+
+function guessOriginalName(originalName = 'photo.jpg') {
+  const base = originalName.replace(/\.[^/.]+$/, '')
+  return `${base}_original.jpg`
+}
+
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1) return `${mb.toFixed(2)} MB`
+  const kb = bytes / 1024
+  return `${kb.toFixed(0)} KB`
+}
+
+// -------------------- Page --------------------
 function ChallengeStep1Page() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const [file, setFile] = useState(null)
+  const [file, setFile] = useState(null) // cropped file (judging/UI)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
@@ -19,8 +111,51 @@ function ChallengeStep1Page() {
   const [adminDemo, setAdminDemo] = useState(false)
   const [uploading, setUploading] = useState(false)
 
+  // ✅ Cropper state (same architecture as Step 3)
+  const [isCropOpen, setIsCropOpen] = useState(false)
+  const [rawSelectedUrl, setRawSelectedUrl] = useState('') // object URL of the selected photo
+  const [rawSelectedName, setRawSelectedName] = useState('photo.jpg')
+  const [rawSelectedFile, setRawSelectedFile] = useState(null) // keep the original File object
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [cropping, setCropping] = useState(false)
+
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  // ---- Upload guardrails (same architecture as Step 3) ----
+  const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
+  const MAX_MARKETING_BYTES = 3 * 1024 * 1024 // 3 MB
+  const MARKETING_MAX_LONG_EDGE = 2048
+  const MARKETING_QUALITY = 0.9
+
+  // ✅ Crop callbacks
+  const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels)
+  }, [])
+
+  const openCropperForFile = (fileObj) => {
+    if (!fileObj) return
+
+    if (fileObj.size > MAX_INPUT_BYTES) {
+      setUploadMessage(
+        `❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(
+          MAX_INPUT_BYTES
+        )}).`
+      )
+      return
+    }
+
+    const objUrl = URL.createObjectURL(fileObj)
+    setRawSelectedUrl(objUrl)
+    setRawSelectedName(fileObj.name || 'photo.jpg')
+    setRawSelectedFile(fileObj)
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
+    setIsCropOpen(true)
+  }
 
   // -------- Session + admin flag + consent gate --------
   useEffect(() => {
@@ -109,17 +244,61 @@ function ChallengeStep1Page() {
   }, [user, adminDemo])
 
   const handleFileChange = (fileObj) => {
-    setFile(fileObj || null)
-    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
     setUploadMessage('')
+    setShowOptions(false)
+
+    if (!fileObj) {
+      setFile(null)
+      setPreviewUrl('')
+      setRawSelectedFile(null)
+      return
+    }
+
+    openCropperForFile(fileObj)
   }
 
-  // Revoke object URL on unmount
+  const confirmCrop = async () => {
+    if (!rawSelectedUrl || !croppedAreaPixels) {
+      setIsCropOpen(false)
+      return
+    }
+
+    try {
+      setCropping(true)
+
+      const blob = await getCroppedBlob(rawSelectedUrl, croppedAreaPixels, {
+        quality: 0.92,
+      })
+
+      const croppedFile = new File([blob], guessFileName(rawSelectedName), {
+        type: 'image/jpeg',
+      })
+
+      setFile(croppedFile)
+      const newPreview = URL.createObjectURL(croppedFile)
+      setPreviewUrl(newPreview)
+      setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
+      setIsCropOpen(false)
+    } catch (err) {
+      console.error(err)
+      setUploadMessage('❌ Could not crop that image. Please try again.')
+      setIsCropOpen(false)
+    } finally {
+      setCropping(false)
+    }
+  }
+
+  const cancelCrop = () => {
+    setIsCropOpen(false)
+  }
+
+  // Revoke object URLs on unmount / change
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (rawSelectedUrl) URL.revokeObjectURL(rawSelectedUrl)
     }
-  }, [previewUrl])
+  }, [previewUrl, rawSelectedUrl])
 
   // -------- Upload handler --------
   const handleUpload = async (e) => {
@@ -157,6 +336,46 @@ function ChallengeStep1Page() {
       setUploadMessage('Uploading…')
 
       const userId = user?.id || 'demo-user'
+
+      // 1) Upload marketing "original" (downsized) based on the raw selected file
+      let originalPath = null
+
+      if (rawSelectedUrl && rawSelectedFile) {
+        const originalBlob = await getResizedBlob(rawSelectedUrl, {
+          maxLongEdge: MARKETING_MAX_LONG_EDGE,
+          quality: MARKETING_QUALITY,
+        })
+
+        if (originalBlob.size > MAX_MARKETING_BYTES) {
+          setUploadMessage(
+            `❌ Your photo is still too large after processing (${formatBytes(
+              originalBlob.size
+            )}). Please choose a different photo.`
+          )
+          setUploading(false)
+          return
+        }
+
+        const originalFile = new File([originalBlob], guessOriginalName(rawSelectedName), {
+          type: 'image/jpeg',
+        })
+
+        originalPath = makeUploadPath(userId, 'originals/step1', originalFile)
+
+        const { data: origData, error: origErr } = await supabase.storage
+          .from('uploads')
+          .upload(originalPath, originalFile)
+
+        if (origErr) {
+          console.error('❌ Storage upload failed (original step1):', origErr.message)
+          setUploadMessage('❌ Upload failed (original): ' + origErr.message)
+          return
+        }
+
+        originalPath = origData?.path || originalPath
+      }
+
+      // 2) Upload cropped/judging image
       const filePath = makeUploadPath(userId, 'step1', file)
 
       const { data, error } = await supabase.storage
@@ -164,27 +383,33 @@ function ChallengeStep1Page() {
         .upload(filePath, file)
 
       if (error) {
-        console.error('❌ Storage upload failed (step1):', error.message)
+        console.error('❌ Storage upload failed (step1 cropped):', error.message)
         setUploadMessage(`❌ Upload failed: ${error.message}`)
         return
       }
 
-      const path = data?.path || filePath
+      const croppedPath = data?.path || filePath
 
+      // 3) Insert DB row with both paths
       if (!adminDemo && user) {
-        const { error: dbError } = await supabase
-          .from('uploads')
-          .insert([{ user_id: user.id, step_number: 1, image_url: path }])
+        const payload = {
+          user_id: user.id,
+          step_number: 1,
+          image_url: croppedPath,
+          original_image_url: originalPath,
+        }
+
+        const { error: dbError } = await supabase.from('uploads').insert([payload])
 
         if (dbError) {
           console.error('⚠️ DB insert error (step1):', dbError.message)
-          setUploadMessage(`✅ File saved, but DB error: ${dbError.message}`)
+          setUploadMessage(`✅ Files saved, but DB error: ${dbError.message}`)
           return
         }
       }
 
       const fullUrl =
-        `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${path}`
+        `https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/${croppedPath}`
       setImageUrl(fullUrl)
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -199,6 +424,7 @@ function ChallengeStep1Page() {
     setImageUrl('')
     setUploadMessage('')
     setShowOptions(false)
+    setRawSelectedFile(null)
   }
 
   const proceedToNextStep = () => {
@@ -258,6 +484,128 @@ function ChallengeStep1Page() {
         minHeight: '100vh',
       }}
     >
+      {/* ✅ Crop modal (same architecture as Step 3) */}
+      {isCropOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.82)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              background: '#111',
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.12)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
+            }}
+          >
+            <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
+              <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
+                Drag to centre. Pinch or use the slider to zoom until the style fills the oval guide.
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', width: '100%', height: 420, background: '#000' }}>
+              <Cropper
+                image={rawSelectedUrl}
+                crop={crop}
+                zoom={zoom}
+                aspect={3 / 4}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+                restrictPosition={false}
+                objectFit="cover"
+              />
+
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '78%',
+                    height: '74%',
+                    borderRadius: '50%',
+                    border: '3px solid rgba(255,255,255,0.9)',
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.01"
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  style={{ width: '70%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+                <button
+                  onClick={cancelCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: '#000',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={confirmCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1.2,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: '#28a745',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                    opacity: cropping ? 0.85 : 1,
+                  }}
+                >
+                  {cropping ? 'Saving…' : 'Use this crop'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Image
@@ -407,6 +755,34 @@ function ChallengeStep1Page() {
               </div>
             )}
           </div>
+
+          {/* ✅ Adjust crop button (same pattern as Step 3) */}
+          {!!previewUrl && !adminDemo && !showOptions && (
+            <button
+              type="button"
+              onClick={() => {
+                setRawSelectedUrl(previewUrl)
+                setRawSelectedName(file?.name || 'photo.jpg')
+                setRawSelectedFile(null) // no raw original in this re-crop path
+                setCrop({ x: 0, y: 0 })
+                setZoom(1)
+                setCroppedAreaPixels(null)
+                setIsCropOpen(true)
+              }}
+              style={{
+                marginTop: 12,
+                padding: '0.6rem 1rem',
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: '#111',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Adjust crop
+            </button>
+          )}
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
