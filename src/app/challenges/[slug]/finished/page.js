@@ -1,106 +1,14 @@
 'use client'
 /* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
 
-import { useEffect, useState, Suspense, useCallback } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
-import Cropper from 'react-easy-crop'
 import { supabase } from '../../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../../lib/uploadPath'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 
 const STORAGE_PREFIX =
   'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
-
-// -------------------- Crop + image helpers (same as Step 1) --------------------
-function createImage(url) {
-  return new Promise((resolve, reject) => {
-    const image = new window.Image()
-    image.addEventListener('load', () => resolve(image))
-    image.addEventListener('error', (err) => reject(err))
-    image.setAttribute('crossOrigin', 'anonymous')
-    image.src = url
-  })
-}
-
-async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = {}) {
-  const image = await createImage(imageSrc)
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Canvas context not available')
-
-  const { width, height, x, y } = croppedAreaPixels
-
-  canvas.width = Math.max(1, Math.floor(width))
-  canvas.height = Math.max(1, Math.floor(height))
-
-  ctx.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return reject(new Error('Image crop failed (no blob).'))
-        resolve(blob)
-      },
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
-// Resize an image Blob (from File/ObjectURL) to a capped long edge.
-// This is the "marketing original": high quality, but not enormous.
-async function getResizedBlob(imageSrc, { maxLongEdge = 2048, quality = 0.9 } = {}) {
-  const image = await createImage(imageSrc)
-
-  const srcW = image.naturalWidth || image.width
-  const srcH = image.naturalHeight || image.height
-  if (!srcW || !srcH) throw new Error('Could not read image dimensions.')
-
-  const longEdge = Math.max(srcW, srcH)
-  const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1
-
-  const outW = Math.max(1, Math.round(srcW * scale))
-  const outH = Math.max(1, Math.round(srcH * scale))
-
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Canvas context not available')
-
-  canvas.width = outW
-  canvas.height = outH
-
-  // Draw scaled
-  ctx.drawImage(image, 0, 0, outW, outH)
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return reject(new Error('Resize failed (no blob).'))
-        resolve(blob)
-      },
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
-function guessFileName(originalName = 'photo.jpg') {
-  const base = originalName.replace(/\.[^/.]+$/, '')
-  return `${base}_cropped.jpg`
-}
-
-function guessOriginalName(originalName = 'photo.jpg') {
-  const base = originalName.replace(/\.[^/.]+$/, '')
-  return `${base}_original.jpg`
-}
-
-function formatBytes(bytes) {
-  if (!bytes && bytes !== 0) return ''
-  const mb = bytes / (1024 * 1024)
-  if (mb >= 1) return `${mb.toFixed(2)} MB`
-  const kb = bytes / 1024
-  return `${kb.toFixed(0)} KB`
-}
 
 function ChallengeFinishedPage() {
   const params = useParams()
@@ -119,15 +27,6 @@ function ChallengeFinishedPage() {
   const [fileModel, setFileModel] = useState(null)
   const [previewModel, setPreviewModel] = useState('')
 
-  // keep originals for upload (downsized)
-  const [rawMannequinUrl, setRawMannequinUrl] = useState('')
-  const [rawMannequinName, setRawMannequinName] = useState('photo.jpg')
-  const [rawMannequinFile, setRawMannequinFile] = useState(null)
-
-  const [rawModelUrl, setRawModelUrl] = useState('')
-  const [rawModelName, setRawModelName] = useState('photo.jpg')
-  const [rawModelFile, setRawModelFile] = useState(null)
-
   // latest existing images (best-effort)
   const [existingMannequinUrl, setExistingMannequinUrl] = useState('')
   const [existingModelUrl, setExistingModelUrl] = useState('')
@@ -145,102 +44,6 @@ function ChallengeFinishedPage() {
   const demo = searchParams.get('demo') === '1'
 
   const challengeId = challenge?.id || null
-
-  // ---- Upload guardrails (same defaults as Step 1) ----
-  const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
-  const MAX_MARKETING_BYTES = 3 * 1024 * 1024 // 3 MB
-  const MARKETING_MAX_LONG_EDGE = 2048
-  const MARKETING_QUALITY = 0.9
-
-  // ✅ Cropper state (shared modal for mannequin/model)
-  const [isCropOpen, setIsCropOpen] = useState(false)
-  const [cropTarget, setCropTarget] = useState(null) // 'mannequin' | 'model'
-  const [crop, setCrop] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
-  const [cropping, setCropping] = useState(false)
-
-  const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
-    setCroppedAreaPixels(croppedPixels)
-  }, [])
-
-  const openCropperForFile = (target, fileObj) => {
-    setUploadMessage('')
-    if (!fileObj) return
-
-    if (fileObj.size > MAX_INPUT_BYTES) {
-      setUploadMessage(
-        `❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(
-          MAX_INPUT_BYTES
-        )}).`
-      )
-      return
-    }
-
-    const objUrl = URL.createObjectURL(fileObj)
-
-    if (target === 'mannequin') {
-      if (rawMannequinUrl) URL.revokeObjectURL(rawMannequinUrl)
-      setRawMannequinUrl(objUrl)
-      setRawMannequinName(fileObj.name || 'photo.jpg')
-      setRawMannequinFile(fileObj)
-    } else {
-      if (rawModelUrl) URL.revokeObjectURL(rawModelUrl)
-      setRawModelUrl(objUrl)
-      setRawModelName(fileObj.name || 'photo.jpg')
-      setRawModelFile(fileObj)
-    }
-
-    setCropTarget(target)
-    setCrop({ x: 0, y: 0 })
-    setZoom(1)
-    setCroppedAreaPixels(null)
-    setIsCropOpen(true)
-  }
-
-  const confirmCrop = async () => {
-    const target = cropTarget
-    const src = target === 'mannequin' ? rawMannequinUrl : rawModelUrl
-    const name = target === 'mannequin' ? rawMannequinName : rawModelName
-
-    if (!target || !src || !croppedAreaPixels) {
-      setIsCropOpen(false)
-      setCropTarget(null)
-      return
-    }
-
-    try {
-      setCropping(true)
-
-      const blob = await getCroppedBlob(src, croppedAreaPixels, { quality: 0.92 })
-      const croppedFile = new File([blob], guessFileName(name), { type: 'image/jpeg' })
-      const newPreview = URL.createObjectURL(croppedFile)
-
-      if (target === 'mannequin') {
-        if (previewMannequin) URL.revokeObjectURL(previewMannequin)
-        setFileMannequin(croppedFile)
-        setPreviewMannequin(newPreview)
-      } else {
-        if (previewModel) URL.revokeObjectURL(previewModel)
-        setFileModel(croppedFile)
-        setPreviewModel(newPreview)
-      }
-
-      setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
-    } catch (err) {
-      console.error(err)
-      setUploadMessage('❌ Could not crop that image. Please try again.')
-    } finally {
-      setCropping(false)
-      setIsCropOpen(false)
-      setCropTarget(null)
-    }
-  }
-
-  const cancelCrop = () => {
-    setIsCropOpen(false)
-    setCropTarget(null)
-  }
 
   // -------- Load challenge metadata by slug --------
   useEffect(() => {
@@ -417,11 +220,15 @@ function ChallengeFinishedPage() {
   }, [user, adminDemo, demo, challengeId])
 
   const handleMannequinChange = (fileObj) => {
-    openCropperForFile('mannequin', fileObj)
+    setFileMannequin(fileObj || null)
+    setPreviewMannequin(fileObj ? URL.createObjectURL(fileObj) : '')
+    setUploadMessage('')
   }
 
   const handleModelChange = (fileObj) => {
-    openCropperForFile('model', fileObj)
+    setFileModel(fileObj || null)
+    setPreviewModel(fileObj ? URL.createObjectURL(fileObj) : '')
+    setUploadMessage('')
   }
 
   // Revoke object URLs on unmount
@@ -429,10 +236,8 @@ function ChallengeFinishedPage() {
     return () => {
       if (previewMannequin) URL.revokeObjectURL(previewMannequin)
       if (previewModel) URL.revokeObjectURL(previewModel)
-      if (rawMannequinUrl) URL.revokeObjectURL(rawMannequinUrl)
-      if (rawModelUrl) URL.revokeObjectURL(rawModelUrl)
     }
-  }, [previewMannequin, previewModel, rawMannequinUrl, rawModelUrl])
+  }, [previewMannequin, previewModel])
 
   // -------- Derive Finished assets from challenge JSON --------
   const stepConfig = (() => {
@@ -513,48 +318,11 @@ function ChallengeFinishedPage() {
 
       // If no new mannequin, keep existing
       let mannequinPath = null
-      let mannequinOriginalPath = null
-
       if (fileMannequin) {
-        // 1) Upload marketing "original" (downsized)
-        if (rawMannequinUrl && rawMannequinFile) {
-          const originalBlob = await getResizedBlob(rawMannequinUrl, {
-            maxLongEdge: MARKETING_MAX_LONG_EDGE,
-            quality: MARKETING_QUALITY,
-          })
-
-          if (originalBlob.size > MAX_MARKETING_BYTES) {
-            setUploadMessage(
-              `❌ Your mannequin photo is still too large after processing (${formatBytes(
-                originalBlob.size
-              )}). Please choose a different photo.`
-            )
-            setUploading(false)
-            return
-          }
-
-          const originalFile = new File([originalBlob], guessOriginalName(rawMannequinName), {
-            type: 'image/jpeg',
-          })
-
-          mannequinOriginalPath = makeUploadPath(userId, 'originals/finished-mannequin', originalFile)
-
-          const { data: origData, error: origErr } = await supabase.storage
-            .from('uploads')
-            .upload(mannequinOriginalPath, originalFile)
-
-          if (origErr) {
-            console.error('❌ Storage upload failed (original finished mannequin):', origErr.message)
-            setUploadMessage('❌ Upload failed (original): ' + origErr.message)
-            return
-          }
-
-          mannequinOriginalPath = origData?.path || mannequinOriginalPath
-        }
-
-        // 2) Upload cropped/judging image
         const filePath = makeUploadPath(userId, 'finished-mannequin', fileMannequin)
-        const { data, error } = await supabase.storage.from('uploads').upload(filePath, fileMannequin)
+        const { data, error } = await supabase.storage
+          .from('uploads')
+          .upload(filePath, fileMannequin)
 
         if (error) {
           console.error('❌ Storage upload failed (finished mannequin):', error.message)
@@ -565,48 +333,11 @@ function ChallengeFinishedPage() {
       }
 
       let modelPath = null
-      let modelOriginalPath = null
-
       if (fileModel) {
-        // 1) Upload marketing "original" (downsized)
-        if (rawModelUrl && rawModelFile) {
-          const originalBlob = await getResizedBlob(rawModelUrl, {
-            maxLongEdge: MARKETING_MAX_LONG_EDGE,
-            quality: MARKETING_QUALITY,
-          })
-
-          if (originalBlob.size > MAX_MARKETING_BYTES) {
-            setUploadMessage(
-              `❌ Your model photo is still too large after processing (${formatBytes(
-                originalBlob.size
-              )}). Please choose a different photo.`
-            )
-            setUploading(false)
-            return
-          }
-
-          const originalFile = new File([originalBlob], guessOriginalName(rawModelName), {
-            type: 'image/jpeg',
-          })
-
-          modelOriginalPath = makeUploadPath(userId, 'originals/finished-model', originalFile)
-
-          const { data: origData, error: origErr } = await supabase.storage
-            .from('uploads')
-            .upload(modelOriginalPath, originalFile)
-
-          if (origErr) {
-            console.error('❌ Storage upload failed (original finished model):', origErr.message)
-            setUploadMessage('❌ Upload failed (original): ' + origErr.message)
-            return
-          }
-
-          modelOriginalPath = origData?.path || modelOriginalPath
-        }
-
-        // 2) Upload cropped/judging image
         const filePath = makeUploadPath(userId, 'finished-model', fileModel)
-        const { data, error } = await supabase.storage.from('uploads').upload(filePath, fileModel)
+        const { data, error } = await supabase.storage
+          .from('uploads')
+          .upload(filePath, fileModel)
 
         if (error) {
           console.error('❌ Storage upload failed (finished model):', error.message)
@@ -625,7 +356,6 @@ function ChallengeFinishedPage() {
             step_number: 4,
             image_url: mannequinPath,
             challenge_id: challengeId,
-            original_image_url: mannequinOriginalPath,
           })
         }
         if (modelPath) {
@@ -634,7 +364,6 @@ function ChallengeFinishedPage() {
             step_number: 4,
             image_url: modelPath,
             challenge_id: challengeId,
-            original_image_url: modelOriginalPath,
           })
         }
 
@@ -797,129 +526,6 @@ function ChallengeFinishedPage() {
         minHeight: '100vh',
       }}
     >
-      {/* ✅ Crop modal */}
-      {isCropOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.82)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 520,
-              background: '#111',
-              borderRadius: 14,
-              border: '1px solid rgba(255,255,255,0.12)',
-              overflow: 'hidden',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
-            }}
-          >
-            <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
-              <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
-                Drag to centre. Pinch or use the slider to zoom until the style fills the oval guide.
-              </div>
-            </div>
-
-            <div style={{ position: 'relative', width: '100%', height: 420, background: '#000' }}>
-              <Cropper
-                image={cropTarget === 'mannequin' ? rawMannequinUrl : rawModelUrl}
-                crop={crop}
-                zoom={zoom}
-                aspect={3 / 4}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={onCropComplete}
-                restrictPosition={false}
-                objectFit="cover"
-              />
-
-              {/* Oval guide overlay (visual only) */}
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  pointerEvents: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <div
-                  style={{
-                    width: '78%',
-                    height: '74%',
-                    borderRadius: '50%',
-                    border: '3px solid rgba(255,255,255,0.9)',
-                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ padding: '1rem' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
-                <input
-                  type="range"
-                  min="1"
-                  max="4"
-                  step="0.01"
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  style={{ width: '70%' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
-                <button
-                  onClick={cancelCrop}
-                  disabled={cropping}
-                  style={{
-                    flex: 1,
-                    padding: '0.85rem 1rem',
-                    borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    background: '#000',
-                    color: '#fff',
-                    fontWeight: 700,
-                    cursor: cropping ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={confirmCrop}
-                  disabled={cropping}
-                  style={{
-                    flex: 1.2,
-                    padding: '0.85rem 1rem',
-                    borderRadius: 10,
-                    border: 'none',
-                    background: '#28a745',
-                    color: '#fff',
-                    fontWeight: 800,
-                    cursor: cropping ? 'not-allowed' : 'pointer',
-                    opacity: cropping ? 0.85 : 1,
-                  }}
-                >
-                  {cropping ? 'Saving…' : 'Use this crop'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Logo */}
       <div style={{ marginBottom: '1.25rem' }}>
         <Image
