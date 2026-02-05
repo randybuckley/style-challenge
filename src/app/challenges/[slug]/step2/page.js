@@ -44,51 +44,9 @@ async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = 
   })
 }
 
-// Resize an image Blob (from File/ObjectURL) to a capped long edge.
-// This is the "marketing original": high quality, but not enormous.
-async function getResizedBlob(imageSrc, { maxLongEdge = 2048, quality = 0.9 } = {}) {
-  const image = await createImage(imageSrc)
-
-  const srcW = image.naturalWidth || image.width
-  const srcH = image.naturalHeight || image.height
-  if (!srcW || !srcH) throw new Error('Could not read image dimensions.')
-
-  const longEdge = Math.max(srcW, srcH)
-  const scale = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1
-
-  const outW = Math.max(1, Math.round(srcW * scale))
-  const outH = Math.max(1, Math.round(srcH * scale))
-
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Canvas context not available')
-
-  canvas.width = outW
-  canvas.height = outH
-
-  // Draw scaled
-  ctx.drawImage(image, 0, 0, outW, outH)
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return reject(new Error('Resize failed (no blob).'))
-        resolve(blob)
-      },
-      'image/jpeg',
-      quality
-    )
-  })
-}
-
 function guessFileName(originalName = 'photo.jpg') {
   const base = originalName.replace(/\.[^/.]+$/, '')
   return `${base}_cropped.jpg`
-}
-
-function guessOriginalName(originalName = 'photo.jpg') {
-  const base = originalName.replace(/\.[^/.]+$/, '')
-  return `${base}_original.jpg`
 }
 
 function formatBytes(bytes) {
@@ -124,7 +82,6 @@ function ChallengeStep2Page() {
   const [isCropOpen, setIsCropOpen] = useState(false)
   const [rawSelectedUrl, setRawSelectedUrl] = useState('') // object URL of the selected photo
   const [rawSelectedName, setRawSelectedName] = useState('photo.jpg')
-  const [rawSelectedFile, setRawSelectedFile] = useState(null) // keep the original File object
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
@@ -140,9 +97,6 @@ function ChallengeStep2Page() {
 
   // ---- Upload guardrails (MVP defaults) ----
   const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
-  const MAX_MARKETING_BYTES = 3 * 1024 * 1024 // 3 MB
-  const MARKETING_MAX_LONG_EDGE = 2048
-  const MARKETING_QUALITY = 0.9
 
   // ✅ Helper: preserve where the user was trying to go
   const buildReturnToHerePath = () => {
@@ -311,7 +265,6 @@ function ChallengeStep2Page() {
     const objUrl = URL.createObjectURL(fileObj)
     setRawSelectedUrl(objUrl)
     setRawSelectedName(fileObj.name || 'photo.jpg')
-    setRawSelectedFile(fileObj)
     setCrop({ x: 0, y: 0 })
     setZoom(1)
     setCroppedAreaPixels(null)
@@ -325,7 +278,6 @@ function ChallengeStep2Page() {
     if (!fileObj) {
       setFile(null)
       setPreviewUrl('')
-      setRawSelectedFile(null)
       return
     }
 
@@ -366,7 +318,6 @@ function ChallengeStep2Page() {
   }
 
   // ✅ Revoke ONLY previewUrl in cleanup.
-  // Do NOT revoke rawSelectedUrl here — it can be in use by getResizedBlob() during upload.
   useEffect(() => {
     return () => {
       if (previewUrl) {
@@ -401,7 +352,7 @@ function ChallengeStep2Page() {
   const demoYourImageUrl = '/demo/images/stylist_step2_reference.jpeg'
   const demoVideoPlaceholderUrl = '/demo/images/video_placeholder_step2.jpeg'
 
-  // -------- Upload handler --------
+  // -------- Upload handler (cropped-only) --------
   const handleUpload = async (e) => {
     e.preventDefault()
     if (uploading) return
@@ -446,43 +397,8 @@ function ChallengeStep2Page() {
 
       const userId = user?.id || 'demo-user'
 
-      // 1) Upload marketing "original" (downsized) based on the raw selected file
-      let originalPath = null
-
-      if (rawSelectedUrl && rawSelectedFile) {
-        const originalBlob = await getResizedBlob(rawSelectedUrl, {
-          maxLongEdge: MARKETING_MAX_LONG_EDGE,
-          quality: MARKETING_QUALITY,
-        })
-
-        if (originalBlob.size > MAX_MARKETING_BYTES) {
-          setUploadMessage(
-            `❌ Your photo is still too large after processing (${formatBytes(originalBlob.size)}). Please choose a different photo.`
-          )
-          setUploading(false)
-          return
-        }
-
-        const originalFile = new File([originalBlob], guessOriginalName(rawSelectedName), {
-          type: 'image/jpeg',
-        })
-
-        originalPath = makeUploadPath(userId, 'originals/step2', originalFile)
-
-        const { data: origData, error: origErr } = await supabase.storage.from('uploads').upload(originalPath, originalFile)
-
-        if (origErr) {
-          console.error('❌ Storage upload failed (original step2):', origErr.message)
-          setUploadMessage('❌ Upload failed (original): ' + origErr.message)
-          return
-        }
-
-        originalPath = origData?.path || originalPath
-      }
-
-      // 2) Upload cropped/judging image
+      // Upload cropped/judging image ONLY
       const filePath = makeUploadPath(userId, 'step2', file)
-
       const { data, error } = await supabase.storage.from('uploads').upload(filePath, file)
 
       if (error) {
@@ -493,21 +409,20 @@ function ChallengeStep2Page() {
 
       const croppedPath = data?.path || filePath
 
-      // 3) Insert DB row with both paths
+      // Insert DB row (no original_image_url)
       if (!adminDemo && user && challengeId) {
         const payload = {
           user_id: user.id,
           step_number: 2,
           image_url: croppedPath,
           challenge_id: challengeId,
-          original_image_url: originalPath,
         }
 
         const { error: dbError } = await supabase.from('uploads').insert([payload])
 
         if (dbError) {
           console.error('⚠️ DB insert error (step2):', dbError.message)
-          setUploadMessage('✅ Files saved, but DB error: ' + dbError.message)
+          setUploadMessage('✅ File saved, but DB error: ' + dbError.message)
           return
         }
       }
@@ -539,7 +454,6 @@ function ChallengeStep2Page() {
     setUploadMessage('')
     setShowOptions(false)
     setNavigating(false)
-    setRawSelectedFile(null)
 
     // Optional hygiene: if you reset, revoke the raw URL too.
     if (rawSelectedUrl) {
