@@ -71,7 +71,7 @@ function ChallengeFinishedPage() {
   const [challenge, setChallenge] = useState(null)
   const [loadingChallenge, setLoadingChallenge] = useState(true)
 
-  // Mannequin upload only
+  // Finished Look upload only
   const [fileMannequin, setFileMannequin] = useState(null)
   const [previewMannequin, setPreviewMannequin] = useState('')
 
@@ -79,7 +79,7 @@ function ChallengeFinishedPage() {
   const [rawMannequinUrl, setRawMannequinUrl] = useState('')
   const [rawMannequinName, setRawMannequinName] = useState('photo.jpg')
 
-  // latest existing mannequin image (best-effort)
+  // latest existing finished look image (best-effort)
   const [existingMannequinUrl, setExistingMannequinUrl] = useState('')
 
   const [uploadMessage, setUploadMessage] = useState('')
@@ -99,7 +99,7 @@ function ChallengeFinishedPage() {
   // ---- Upload guardrails ----
   const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
 
-  // ✅ Cropper state (mannequin only)
+  // ✅ Cropper state (finished look only)
   const [isCropOpen, setIsCropOpen] = useState(false)
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
@@ -258,7 +258,7 @@ function ChallengeFinishedPage() {
     loadSessionAndConsent()
   }, [router, searchParams, demo])
 
-  // -------- Load latest Finished Look mannequin image --------
+  // -------- Load latest Finished Look image --------
   useEffect(() => {
     if (!user || adminDemo || demo || !challengeId) return
 
@@ -278,7 +278,7 @@ function ChallengeFinishedPage() {
         console.warn('Error loading existing Finished Look rows:', error.message)
       }
 
-      // Find most recent mannequin path by folder naming convention
+      // Find most recent finished look path by folder naming convention
       if (!cancelled && rows && rows.length) {
         for (const r of rows) {
           const p = r?.image_url || ''
@@ -290,7 +290,7 @@ function ChallengeFinishedPage() {
         }
       }
 
-      // 2) Storage fallback (mannequin)
+      // 2) Storage fallback
       if (!cancelled) {
         try {
           const folder = `${user.id}/finished-mannequin`
@@ -304,7 +304,7 @@ function ChallengeFinishedPage() {
             if (!existingMannequinUrl) setExistingMannequinUrl(STORAGE_PREFIX + path)
           }
         } catch (err) {
-          console.warn('Finished mannequin storage fallback error:', err)
+          console.warn('Finished look storage fallback error:', err)
         }
       }
     }
@@ -348,18 +348,18 @@ function ChallengeFinishedPage() {
       ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}${referenceImageUrlRaw}`
       : referenceImageUrlRaw
 
-  // ✅ DEMO mannequin placeholder
-  const demoYourMannequinUrl = '/demo/images/stylist_finished_reference.jpeg'
+  // ✅ DEMO finished look placeholder
+  const demoYourFinishedUrl = '/demo/images/stylist_finished_reference.jpeg'
   const demoVideoPlaceholderUrl = '/demo/images/video_placeholder_finished.jpeg'
 
-  // -------- Upload handler (mannequin only, cropped only) --------
+  // -------- Upload handler (finished look only, cropped only) --------
   const handleUpload = async (e) => {
     e.preventDefault()
     if (uploading) return
 
     // ✅ DEMO: no uploads; just proceed
     if (demo) {
-      setUploadMessage('✅ Demo mode: using the demo finished look mannequin image.')
+      setUploadMessage('✅ Demo mode: using the demo finished look image.')
       setShowOptions(true)
       return
     }
@@ -369,16 +369,16 @@ function ChallengeFinishedPage() {
       return
     }
 
-    // Admin demo shortcut: allow proceeding if mannequin already exists
+    // Admin demo shortcut: allow proceeding if finished look already exists
     if (adminDemo && !fileMannequin && existingMannequinUrl) {
-      setUploadMessage('✅ Demo mode: using your existing Finished Look mannequin photo.')
+      setUploadMessage('✅ Demo mode: using your existing Finished Look photo.')
       setShowOptions(true)
       return
     }
 
-    // Block if no mannequin file AND no existing mannequin
+    // Block if no new file AND no existing image
     if (!fileMannequin && !existingMannequinUrl) {
-      setUploadMessage('Please upload your Finished Look mannequin photo to continue.')
+      setUploadMessage('Please upload your Finished Look photo to continue.')
       return
     }
 
@@ -394,40 +394,40 @@ function ChallengeFinishedPage() {
 
       const userId = user?.id || 'demo-user'
 
-      let mannequinPath = null
+      let imagePath = null
 
       if (fileMannequin) {
         const filePath = makeUploadPath(userId, 'finished-mannequin', fileMannequin)
         const { data, error } = await supabase.storage.from('uploads').upload(filePath, fileMannequin)
 
         if (error) {
-          console.error('❌ Storage upload failed (finished mannequin):', error.message)
+          console.error('❌ Storage upload failed (finished look):', error.message)
           setUploadMessage('❌ Upload failed: ' + error.message)
           return
         }
 
-        mannequinPath = data?.path || filePath
+        imagePath = data?.path || filePath
       }
 
       // DB insert only for real users
-      if (!adminDemo && user && challengeId && mannequinPath) {
+      if (!adminDemo && user && challengeId && imagePath) {
         const { error: dbError } = await supabase.from('uploads').insert([
           {
             user_id: user.id,
             step_number: 4,
-            image_url: mannequinPath,
+            image_url: imagePath,
             challenge_id: challengeId,
           },
         ])
 
         if (dbError) {
-          console.error('⚠️ DB insert error (finished mannequin):', dbError.message)
+          console.error('⚠️ DB insert error (finished look):', dbError.message)
           setUploadMessage('✅ File saved, but DB error: ' + dbError.message)
           return
         }
       }
 
-      if (mannequinPath) setExistingMannequinUrl(STORAGE_PREFIX + mannequinPath)
+      if (imagePath) setExistingMannequinUrl(STORAGE_PREFIX + imagePath)
 
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -552,8 +552,8 @@ function ChallengeFinishedPage() {
     whiteSpace: 'nowrap',
   }
 
-  const mannequinSrc = demo ? demoYourMannequinUrl : previewMannequin || existingMannequinUrl
-  const hasMannequin = !!mannequinSrc
+  const finishedSrc = demo ? demoYourFinishedUrl : previewMannequin || existingMannequinUrl
+  const hasFinished = !!finishedSrc
 
   return (
     <main
@@ -707,7 +707,7 @@ function ChallengeFinishedPage() {
       <p style={{ marginBottom: '1rem', fontSize: '1rem', color: '#ddd', lineHeight: 1.5 }}>
         This is your final step! Capture your very best work.
         <br />
-        A clear mannequin photo completes the challenge.
+        A clear finished look photo completes the challenge.
       </p>
 
       <hr
@@ -789,13 +789,13 @@ function ChallengeFinishedPage() {
 
         <div style={{ flex: 1, minWidth: 200 }}>
           <p>
-            <strong>Your Mannequin Photo</strong>
+            <strong>Your Finished Look Photo</strong>
             <br />
             <span style={{ fontSize: '0.85rem', color: '#bbb' }}>(Required)</span>
           </p>
           <div style={overlayFrame}>
-            {hasMannequin ? (
-              <img src={mannequinSrc} alt="Your Finished Look (Mannequin)" style={previewImageStyle} />
+            {hasFinished ? (
+              <img src={finishedSrc} alt="Your Finished Look" style={previewImageStyle} />
             ) : (
               <div
                 style={{
@@ -809,7 +809,7 @@ function ChallengeFinishedPage() {
               <div style={oval} />
             </div>
 
-            {!hasMannequin && (
+            {!hasFinished && (
               <div
                 style={{
                   position: 'absolute',
@@ -849,7 +849,7 @@ function ChallengeFinishedPage() {
               fontWeight: 600,
             }}
           >
-            📸 Finished Look (Mannequin) — Required
+            📸 Finished Look — Required
             <input
               type="file"
               accept="image/*"
@@ -868,7 +868,7 @@ function ChallengeFinishedPage() {
               marginBottom: '1rem',
             }}
           >
-            The mannequin photo is required to complete the challenge.
+            This photo is required to complete the challenge.
           </p>
 
           <button

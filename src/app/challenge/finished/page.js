@@ -64,15 +64,15 @@ function FinishedLookInner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const [mannequinFile, setMannequinFile] = useState(null) // cropped mannequin (judging/UI)
-  const [mannequinUrl, setMannequinUrl] = useState('')
+  const [file, setFile] = useState(null)
+  const [photoUrl, setPhotoUrl] = useState('')
 
   const [uploadMessage, setUploadMessage] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [adminDemo, setAdminDemo] = useState(false)
   const [uploading, setUploading] = useState(false)
 
-  // ✅ Cropper state (mannequin only)
+  // Cropper state
   const [isCropOpen, setIsCropOpen] = useState(false)
   const [rawSelectedUrl, setRawSelectedUrl] = useState('')
   const [rawSelectedName, setRawSelectedName] = useState('photo.jpg')
@@ -81,13 +81,12 @@ function FinishedLookInner() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [cropping, setCropping] = useState(false)
 
-  // ---- Upload guardrails ----
+  // Guardrails
   const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
 
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Session + admin flag
   useEffect(() => {
     let alive = true
     const isAdminDemo = searchParams.get('admin_demo') === 'true'
@@ -109,48 +108,41 @@ function FinishedLookInner() {
     }
   }, [router, searchParams])
 
-  // Fetch any existing step-4 uploads (mannequin only)
+  // Fetch any existing step-4 uploads (best effort)
   useEffect(() => {
-    const fetchFinishedImages = async () => {
+    const fetchFinished = async () => {
       if (!user || adminDemo) return
 
-      const { data, error } = await supabase
-        .from('uploads')
-        .select('image_url')
-        .eq('user_id', user.id)
-        .eq('step_number', 4)
+      const { data, error } = await supabase.from('uploads').select('image_url').eq('user_id', user.id).eq('step_number', 4)
 
       if (error) {
-        console.warn('Error fetching finished look uploads:', error.message)
+        console.warn('Error fetching finished uploads:', error.message)
         return
       }
 
       if (data && data.length > 0) {
-        // Prefer a clear mannequin match if present, otherwise take first row.
-        const mannequin =
+        // Prefer finished-mannequin folder if present; otherwise take first
+        const best =
           data.find((img) => (img?.image_url || '').includes('finished-mannequin')) ||
-          data.find((img) => (img?.image_url || '').includes('mannequin')) ||
           data[0]
 
-        if (mannequin?.image_url) {
-          setMannequinUrl(`${STORAGE_PREFIX}${mannequin.image_url}`)
+        if (best?.image_url) {
+          setPhotoUrl(`${STORAGE_PREFIX}${best.image_url}`)
           setShowOptions(true)
         }
       }
     }
 
-    fetchFinishedImages()
+    fetchFinished()
   }, [user, adminDemo])
 
-  // Revoke any previous blob URLs to avoid memory leaks
   useEffect(() => {
     return () => {
-      if (mannequinUrl && mannequinUrl.startsWith('blob:')) URL.revokeObjectURL(mannequinUrl)
+      if (photoUrl && photoUrl.startsWith('blob:')) URL.revokeObjectURL(photoUrl)
       if (rawSelectedUrl && rawSelectedUrl.startsWith('blob:')) URL.revokeObjectURL(rawSelectedUrl)
     }
-  }, [mannequinUrl, rawSelectedUrl])
+  }, [photoUrl, rawSelectedUrl])
 
-  // ✅ Crop callbacks
   const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
     setCroppedAreaPixels(croppedPixels)
   }, [])
@@ -159,15 +151,10 @@ function FinishedLookInner() {
     if (!fileObj) return
 
     if (fileObj.size > MAX_INPUT_BYTES) {
-      setUploadMessage(
-        `❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(
-          MAX_INPUT_BYTES
-        )}).`
-      )
+      setUploadMessage(`❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(MAX_INPUT_BYTES)}).`)
       return
     }
 
-    // Revoke any previous raw URL
     if (rawSelectedUrl && rawSelectedUrl.startsWith('blob:')) URL.revokeObjectURL(rawSelectedUrl)
 
     const objUrl = URL.createObjectURL(fileObj)
@@ -179,14 +166,14 @@ function FinishedLookInner() {
     setIsCropOpen(true)
   }
 
-  const handleMannequinSelect = (fileObj) => {
+  const handleSelect = (fileObj) => {
     setUploadMessage('')
     setShowOptions(false)
 
     if (!fileObj) {
-      if (mannequinUrl && mannequinUrl.startsWith('blob:')) URL.revokeObjectURL(mannequinUrl)
-      setMannequinFile(null)
-      setMannequinUrl('')
+      if (photoUrl && photoUrl.startsWith('blob:')) URL.revokeObjectURL(photoUrl)
+      setFile(null)
+      setPhotoUrl('')
       return
     }
 
@@ -206,10 +193,10 @@ function FinishedLookInner() {
       const croppedFile = new File([blob], guessFileName(rawSelectedName), { type: 'image/jpeg' })
       const preview = URL.createObjectURL(croppedFile)
 
-      if (mannequinUrl && mannequinUrl.startsWith('blob:')) URL.revokeObjectURL(mannequinUrl)
-      setMannequinFile(croppedFile)
-      setMannequinUrl(preview)
+      if (photoUrl && photoUrl.startsWith('blob:')) URL.revokeObjectURL(photoUrl)
 
+      setFile(croppedFile)
+      setPhotoUrl(preview)
       setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
       setIsCropOpen(false)
     } catch (err) {
@@ -229,8 +216,8 @@ function FinishedLookInner() {
     e.preventDefault()
     if (uploading) return
 
-    if (!mannequinFile && !adminDemo) {
-      setUploadMessage('Please upload a mannequin photo to finish.')
+    if (!file && !adminDemo) {
+      setUploadMessage('Please upload your Finished Look photo to continue.')
       return
     }
 
@@ -240,67 +227,52 @@ function FinishedLookInner() {
 
       const userId = user?.id || 'demo-user'
 
-      // Mannequin (required outside demo)
-      if (mannequinFile) {
-        const mannequinPath = makeUploadPath(userId, 'finished-mannequin', mannequinFile)
-        const { error: manError } = await supabase.storage.from('uploads').upload(mannequinPath, mannequinFile)
+      if (file) {
+        // Keep storage folder naming stable (do NOT change path conventions)
+        const filePath = makeUploadPath(userId, 'finished-mannequin', file)
+        const { error: upErr } = await supabase.storage.from('uploads').upload(filePath, file)
 
-        if (manError) {
-          setUploadMessage(`❌ Upload failed: ${manError.message}`)
+        if (upErr) {
+          setUploadMessage(`❌ Upload failed: ${upErr.message}`)
           return
         }
 
         if (!adminDemo && user?.id) {
           const { error: dbError } = await supabase.from('uploads').insert([
-            {
-              user_id: user.id,
-              step_number: 4,
-              image_url: mannequinPath,
-            },
+            { user_id: user.id, step_number: 4, image_url: filePath },
           ])
-
-          if (dbError) {
-            console.warn('DB insert error:', dbError.message)
-          }
+          if (dbError) console.warn('DB insert error:', dbError.message)
         }
 
-        setMannequinUrl(`${STORAGE_PREFIX}${mannequinPath}`)
+        setPhotoUrl(`${STORAGE_PREFIX}${filePath}`)
       }
 
       setUploadMessage('✅ Finished Look upload complete!')
       setShowOptions(true)
     } catch (err) {
       console.error(err)
-      const msg = err?.message ? String(err.message) : 'Upload failed.'
-      setUploadMessage(`❌ ${msg}`)
+      setUploadMessage(`❌ ${err?.message ? String(err.message) : 'Upload failed.'}`)
     } finally {
       setUploading(false)
     }
   }
 
   const resetUpload = () => {
-    if (mannequinUrl && mannequinUrl.startsWith('blob:')) URL.revokeObjectURL(mannequinUrl)
-
-    setMannequinFile(null)
-    setMannequinUrl('')
+    if (photoUrl && photoUrl.startsWith('blob:')) URL.revokeObjectURL(photoUrl)
+    setFile(null)
+    setPhotoUrl('')
     setUploadMessage('')
     setShowOptions(false)
   }
 
-  // Replace instead of push to avoid bouncing back here
   const proceedToPortfolio = () => {
     router.replace('/challenge/portfolio' + (adminDemo ? '?admin_demo=true' : ''))
   }
 
   if (loading) return <p>Loading Finished Look…</p>
 
-  // --- shared frame + oval styles (match Steps 1–3) ---
-  const overlayFrame = {
-    position: 'relative',
-    width: '100%',
-    maxWidth: 320,
-    margin: '0 auto',
-  }
+  // Styles
+  const overlayFrame = { position: 'relative', width: '100%', maxWidth: 320, margin: '0 auto' }
 
   const previewImageStyle = {
     width: '100%',
@@ -318,59 +290,17 @@ function FinishedLookInner() {
     background: 'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
   }
 
-  const ovalMask = {
-    position: 'absolute',
-    inset: 0,
-    pointerEvents: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  }
+  const ovalMask = { position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+  const oval = { width: '88%', height: '78%', borderRadius: '50%', border: '3px solid rgba(255,255,255,0.9)' }
 
-  const oval = {
-    width: '88%',
-    height: '78%',
-    borderRadius: '50%',
-    border: '3px solid rgba(255,255,255,0.9)',
-  }
-
-  const hasMannequin = !!mannequinUrl
+  const hasPhoto = !!photoUrl
 
   return (
-    <main
-      style={{
-        maxWidth: 700,
-        margin: '0 auto',
-        padding: '2rem',
-        fontFamily: 'sans-serif',
-        textAlign: 'center',
-      }}
-    >
-      {/* ✅ Crop modal */}
+    <main style={{ maxWidth: 700, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif', textAlign: 'center' }}>
+      {/* Crop modal */}
       {isCropOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.82)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 520,
-              background: '#111',
-              borderRadius: 14,
-              border: '1px solid rgba(255,255,255,0.12)',
-              overflow: 'hidden',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
-            }}
-          >
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div style={{ width: '100%', maxWidth: 520, background: '#111', borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }}>
             <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
               <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
@@ -390,78 +320,22 @@ function FinishedLookInner() {
                 restrictPosition={false}
                 objectFit="cover"
               />
-
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  pointerEvents: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <div
-                  style={{
-                    width: '78%',
-                    height: '74%',
-                    borderRadius: '50%',
-                    border: '3px solid rgba(255,255,255,0.9)',
-                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
-                  }}
-                />
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '78%', height: '74%', borderRadius: '50%', border: '3px solid rgba(255,255,255,0.9)', boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)' }} />
               </div>
             </div>
 
             <div style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
-                <input
-                  type="range"
-                  min="1"
-                  max="4"
-                  step="0.01"
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  style={{ width: '70%' }}
-                />
+                <input type="range" min="1" max="4" step="0.01" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} style={{ width: '70%' }} />
               </div>
 
               <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
-                <button
-                  type="button"
-                  onClick={cancelCrop}
-                  disabled={cropping}
-                  style={{
-                    flex: 1,
-                    padding: '0.85rem 1rem',
-                    borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    background: '#000',
-                    color: '#fff',
-                    fontWeight: 700,
-                    cursor: cropping ? 'not-allowed' : 'pointer',
-                  }}
-                >
+                <button type="button" onClick={cancelCrop} disabled={cropping} style={{ flex: 1, padding: '0.85rem 1rem', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: '#000', color: '#fff', fontWeight: 700, cursor: cropping ? 'not-allowed' : 'pointer' }}>
                   Cancel
                 </button>
-
-                <button
-                  type="button"
-                  onClick={confirmCrop}
-                  disabled={cropping}
-                  style={{
-                    flex: 1.2,
-                    padding: '0.85rem 1rem',
-                    borderRadius: 10,
-                    border: 'none',
-                    background: '#28a745',
-                    color: '#fff',
-                    fontWeight: 800,
-                    cursor: cropping ? 'not-allowed' : 'pointer',
-                    opacity: cropping ? 0.85 : 1,
-                  }}
-                >
+                <button type="button" onClick={confirmCrop} disabled={cropping} style={{ flex: 1.2, padding: '0.85rem 1rem', borderRadius: 10, border: 'none', background: '#28a745', color: '#fff', fontWeight: 800, cursor: cropping ? 'not-allowed' : 'pointer', opacity: cropping ? 0.85 : 1 }}>
                   {cropping ? 'Saving…' : 'Use this crop'}
                 </button>
               </div>
@@ -471,57 +345,21 @@ function FinishedLookInner() {
       )}
 
       <div style={{ marginBottom: '1.5rem' }}>
-        <Image
-          src="/logo.jpeg"
-          alt="Style Challenge Logo"
-          width={240}
-          height={0}
-          style={{ height: 'auto', maxWidth: '100%' }}
-          priority
-        />
+        <Image src="/logo.jpeg" alt="Style Challenge Logo" width={240} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Finished Look: Show Off Your Best Work</h1>
-      <hr
-        style={{
-          width: '50%',
-          margin: '0.5rem auto 1rem auto',
-          border: '0.5px solid #666',
-        }}
-      />
-      <p
-        style={{
-          marginBottom: '2rem',
-          fontSize: '1rem',
-          color: '#ddd',
-          lineHeight: '1.5',
-        }}
-      >
+      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
+      <p style={{ marginBottom: '2rem', fontSize: '1rem', color: '#ddd', lineHeight: '1.5' }}>
         This is your final step! Capture your <strong>very best work</strong>.
         <br />
-        A clear mannequin photo completes the challenge.
+        A clear photo completes the challenge.
       </p>
 
-      {/* Video */}
-      <div
-        style={{
-          marginBottom: '2rem',
-          width: '100%',
-          aspectRatio: '16 / 9',
-          position: 'relative',
-        }}
-      >
+      <div style={{ marginBottom: '2rem', width: '100%', aspectRatio: '16 / 9', position: 'relative' }}>
         <iframe
           src="https://player.vimeo.com/video/1096804435?badge=0&autopause=0&player_id=0&app_id=58479&dnt=1"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            border: '2px solid #555',
-            borderRadius: '6px',
-          }}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: '2px solid #555', borderRadius: '6px' }}
           frameBorder="0"
           allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
           allowFullScreen
@@ -529,151 +367,42 @@ function FinishedLookInner() {
         />
       </div>
 
-      {/* Compare section */}
-      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
-        Compare Your Finished Look
-      </h3>
-      <div
-        style={{
-          display: 'flex',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          textAlign: 'center',
-          marginBottom: '2rem',
-        }}
-      >
-        {/* Patrick finished */}
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>Compare Your Finished Look</h3>
+
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', textAlign: 'center', marginBottom: '2rem' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Patrick’s Finished Version</strong>
-          </p>
+          <p><strong>Patrick’s Finished Version</strong></p>
           <div style={overlayFrame}>
             <img src="/style_one/finished_reference.jpeg" alt="Patrick Finished Reference" style={previewImageStyle} />
           </div>
         </div>
 
-        {/* Mannequin */}
         <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Your Mannequin Photo</strong>
-          </p>
+          <p><strong>Your Finished Look Photo</strong></p>
           <div style={overlayFrame}>
-            {hasMannequin ? (
-              <img src={mannequinUrl} alt="Mannequin Upload" style={previewImageStyle} />
-            ) : (
-              <div style={placeholderStyle} />
-            )}
-
-            <div style={ovalMask}>
-              <div style={oval} />
-            </div>
-
-            {!hasMannequin && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 14,
-                  left: 0,
-                  right: 0,
-                  color: '#fff',
-                  fontSize: '0.9rem',
-                  textAlign: 'center',
-                  opacity: 0.9,
-                }}
-              >
+            {hasPhoto ? <img src={photoUrl} alt="Your Finished Look" style={previewImageStyle} /> : <div style={placeholderStyle} />}
+            <div style={ovalMask}><div style={oval} /></div>
+            {!hasPhoto && (
+              <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, color: '#fff', fontSize: '0.9rem', textAlign: 'center', opacity: 0.9 }}>
                 Hold phone upright — fill the oval
               </div>
             )}
           </div>
-
-          {!!mannequinUrl && mannequinUrl.startsWith('blob:') && !adminDemo && !showOptions && (
-            <button
-              type="button"
-              onClick={() => {
-                // Re-crop from the *cropped preview*
-                if (rawSelectedUrl && rawSelectedUrl.startsWith('blob:')) URL.revokeObjectURL(rawSelectedUrl)
-                setRawSelectedUrl(mannequinUrl)
-                setRawSelectedName(mannequinFile?.name || 'photo.jpg')
-                setCrop({ x: 0, y: 0 })
-                setZoom(1)
-                setCroppedAreaPixels(null)
-                setIsCropOpen(true)
-              }}
-              style={{
-                marginTop: 12,
-                padding: '0.6rem 1rem',
-                borderRadius: 999,
-                border: '1px solid rgba(0,0,0,0.15)',
-                background: '#f5f5f5',
-                color: '#000',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Adjust crop
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Upload form */}
       {!showOptions && (
         <form onSubmit={handleUpload} style={{ marginTop: '2rem' }}>
-          <label
-            style={{
-              display: 'block',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: '#f5f5f5',
-              color: '#000',
-              borderRadius: '999px',
-              border: '2px solid #000',
-              fontSize: '1rem',
-              cursor: 'pointer',
-              textAlign: 'center',
-              marginBottom: '0.75rem',
-              fontWeight: 600,
-            }}
-          >
-            📸 Take Photo / Choose Photo (Mannequin – Required)
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => handleMannequinSelect(e.target.files[0])}
-              style={{ display: 'none' }}
-            />
+          <label style={{ display: 'block', padding: '0.75rem 1.5rem', backgroundColor: '#f5f5f5', color: '#000', borderRadius: '999px', border: '2px solid #000', fontSize: '1rem', cursor: 'pointer', textAlign: 'center', marginBottom: '0.75rem', fontWeight: 600 }}>
+            📸 Take Photo / Choose Photo (Required)
+            <input type="file" accept="image/*" capture="environment" onChange={(e) => handleSelect(e.target.files[0])} style={{ display: 'none' }} />
           </label>
 
-          <p
-            style={{
-              fontSize: '1rem',
-              color: '#fff',
-              lineHeight: '1.4',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
-              marginBottom: '1rem',
-            }}
-          >
+          <p style={{ fontSize: '1rem', color: '#fff', lineHeight: '1.4', textShadow: '0 0 3px rgba(0,0,0,0.5)', marginBottom: '1rem' }}>
             Make sure this image reflects your <strong>best work</strong> before confirming.
           </p>
 
-          <button
-            type="submit"
-            disabled={uploading}
-            style={{
-              marginTop: '0.5rem',
-              padding: '1rem 2rem',
-              backgroundColor: uploading ? '#1c7e33' : '#28a745',
-              color: '#fff',
-              borderRadius: '6px',
-              border: 'none',
-              cursor: uploading ? 'not-allowed' : 'pointer',
-              fontSize: '1.1rem',
-              fontWeight: '600',
-              minWidth: '260px',
-              opacity: uploading ? 0.85 : 1,
-            }}
-          >
+          <button type="submit" disabled={uploading} style={{ marginTop: '0.5rem', padding: '1rem 2rem', backgroundColor: uploading ? '#1c7e33' : '#28a745', color: '#fff', borderRadius: '6px', border: 'none', cursor: uploading ? 'not-allowed' : 'pointer', fontSize: '1.1rem', fontWeight: '600', minWidth: '260px', opacity: uploading ? 0.85 : 1 }}>
             {uploading ? 'Uploading…' : '✅ Confirm & Add to Portfolio'}
           </button>
 
@@ -681,73 +410,19 @@ function FinishedLookInner() {
         </form>
       )}
 
-      {/* After upload */}
       {(showOptions || adminDemo) && (
-        <div
-          style={{
-            marginTop: '3rem',
-            padding: '1.5rem',
-            border: '2px solid #28a745',
-            borderRadius: '8px',
-            background: 'rgba(40, 167, 69, 0.1)',
-            textAlign: 'center',
-          }}
-        >
-          <h2
-            style={{
-              color: '#28a745',
-              fontSize: '1.5rem',
-              marginBottom: '0.75rem',
-              fontWeight: '700',
-            }}
-          >
-            🎉 Finished Look Complete!
-          </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              color: '#fff',
-              lineHeight: '1.5',
-              textShadow: '0 0 3px rgba(0,0,0,0.5)',
-              marginBottom: '1rem',
-            }}
-          >
+        <div style={{ marginTop: '3rem', padding: '1.5rem', border: '2px solid #28a745', borderRadius: '8px', background: 'rgba(40, 167, 69, 0.1)', textAlign: 'center' }}>
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>🎉 Finished Look Complete!</h2>
+          <p style={{ fontSize: '1.1rem', color: '#fff', lineHeight: '1.5', textShadow: '0 0 3px rgba(0,0,0,0.5)', marginBottom: '1rem' }}>
             Does this final look represent your <strong>best work</strong>? If yes, you’re ready to view your portfolio.
           </p>
 
-          <button
-            onClick={proceedToPortfolio}
-            style={{
-              backgroundColor: '#28a745',
-              color: '#fff',
-              padding: '0.75rem 1.5rem',
-              fontSize: '1.1rem',
-              border: 'none',
-              borderRadius: '6px',
-              marginRight: '1rem',
-              cursor: 'pointer',
-              fontWeight: '600',
-              minWidth: '200px',
-            }}
-          >
+          <button onClick={proceedToPortfolio} style={{ backgroundColor: '#28a745', color: '#fff', padding: '0.75rem 1.5rem', fontSize: '1.1rem', border: 'none', borderRadius: '6px', marginRight: '1rem', cursor: 'pointer', fontWeight: '600', minWidth: '200px' }}>
             ✅ Yes, Add to Portfolio
           </button>
 
           {!adminDemo && (
-            <button
-              onClick={resetUpload}
-              style={{
-                backgroundColor: '#000',
-                color: '#fff',
-                padding: '0.75rem 1.5rem',
-                fontSize: '1.1rem',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: '600',
-                minWidth: '200px',
-              }}
-            >
+            <button onClick={resetUpload} style={{ backgroundColor: '#000', color: '#fff', padding: '0.75rem 1.5rem', fontSize: '1.1rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', minWidth: '200px' }}>
               🔁 No, I’ll Upload a Better Pic
             </button>
           )}
@@ -757,16 +432,9 @@ function FinishedLookInner() {
   )
 }
 
-// Suspense wrapper for useSearchParams()
 export default function FinishedLookPage() {
   return (
-    <Suspense
-      fallback={
-        <main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>
-          Loading…
-        </main>
-      }
-    >
+    <Suspense fallback={<main style={{ padding: '2rem', color: '#ccc', textAlign: 'center' }}>Loading…</main>}>
       <FinishedLookInner />
     </Suspense>
   )
