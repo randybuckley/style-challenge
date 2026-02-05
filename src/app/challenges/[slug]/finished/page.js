@@ -1,14 +1,64 @@
 'use client'
 /* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useCallback } from 'react'
 import Image from 'next/image'
+import Cropper from 'react-easy-crop'
 import { supabase } from '../../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../../lib/uploadPath'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 
 const STORAGE_PREFIX =
   'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
+
+// -------------------- Crop + image helpers --------------------
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.addEventListener('load', () => resolve(image))
+    image.addEventListener('error', (err) => reject(err))
+    image.setAttribute('crossOrigin', 'anonymous')
+    image.src = url
+  })
+}
+
+async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = {}) {
+  const image = await createImage(imageSrc)
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context not available')
+
+  const { width, height, x, y } = croppedAreaPixels
+
+  canvas.width = Math.max(1, Math.floor(width))
+  canvas.height = Math.max(1, Math.floor(height))
+
+  ctx.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return reject(new Error('Image crop failed (no blob).'))
+        resolve(blob)
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+function guessFileName(originalName = 'photo.jpg') {
+  const base = originalName.replace(/\.[^/.]+$/, '')
+  return `${base}_cropped.jpg`
+}
+
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1) return `${mb.toFixed(2)} MB`
+  const kb = bytes / 1024
+  return `${kb.toFixed(0)} KB`
+}
 
 function ChallengeFinishedPage() {
   const params = useParams()
@@ -21,15 +71,16 @@ function ChallengeFinishedPage() {
   const [challenge, setChallenge] = useState(null)
   const [loadingChallenge, setLoadingChallenge] = useState(true)
 
-  // uploads
+  // Mannequin upload only
   const [fileMannequin, setFileMannequin] = useState(null)
   const [previewMannequin, setPreviewMannequin] = useState('')
-  const [fileModel, setFileModel] = useState(null)
-  const [previewModel, setPreviewModel] = useState('')
 
-  // latest existing images (best-effort)
+  // raw object URL for cropping
+  const [rawMannequinUrl, setRawMannequinUrl] = useState('')
+  const [rawMannequinName, setRawMannequinName] = useState('photo.jpg')
+
+  // latest existing mannequin image (best-effort)
   const [existingMannequinUrl, setExistingMannequinUrl] = useState('')
-  const [existingModelUrl, setExistingModelUrl] = useState('')
 
   const [uploadMessage, setUploadMessage] = useState('')
   const [showOptions, setShowOptions] = useState(false)
@@ -44,6 +95,76 @@ function ChallengeFinishedPage() {
   const demo = searchParams.get('demo') === '1'
 
   const challengeId = challenge?.id || null
+
+  // ---- Upload guardrails ----
+  const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
+
+  // ✅ Cropper state (mannequin only)
+  const [isCropOpen, setIsCropOpen] = useState(false)
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [cropping, setCropping] = useState(false)
+
+  const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels)
+  }, [])
+
+  const openCropperForFile = (fileObj) => {
+    setUploadMessage('')
+    if (!fileObj) return
+
+    if (fileObj.size > MAX_INPUT_BYTES) {
+      setUploadMessage(
+        `❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(
+          MAX_INPUT_BYTES
+        )}).`
+      )
+      return
+    }
+
+    const objUrl = URL.createObjectURL(fileObj)
+
+    if (rawMannequinUrl) URL.revokeObjectURL(rawMannequinUrl)
+    setRawMannequinUrl(objUrl)
+    setRawMannequinName(fileObj.name || 'photo.jpg')
+
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
+    setIsCropOpen(true)
+  }
+
+  const confirmCrop = async () => {
+    if (!rawMannequinUrl || !croppedAreaPixels) {
+      setIsCropOpen(false)
+      return
+    }
+
+    try {
+      setCropping(true)
+
+      const blob = await getCroppedBlob(rawMannequinUrl, croppedAreaPixels, { quality: 0.92 })
+      const croppedFile = new File([blob], guessFileName(rawMannequinName), { type: 'image/jpeg' })
+      const newPreview = URL.createObjectURL(croppedFile)
+
+      if (previewMannequin) URL.revokeObjectURL(previewMannequin)
+      setFileMannequin(croppedFile)
+      setPreviewMannequin(newPreview)
+
+      setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
+    } catch (err) {
+      console.error(err)
+      setUploadMessage('❌ Could not crop that image. Please try again.')
+    } finally {
+      setCropping(false)
+      setIsCropOpen(false)
+    }
+  }
+
+  const cancelCrop = () => {
+    setIsCropOpen(false)
+  }
 
   // -------- Load challenge metadata by slug --------
   useEffect(() => {
@@ -137,7 +258,7 @@ function ChallengeFinishedPage() {
     loadSessionAndConsent()
   }, [router, searchParams, demo])
 
-  // -------- Load latest Finished Look images (mannequin + model) --------
+  // -------- Load latest Finished Look mannequin image --------
   useEffect(() => {
     if (!user || adminDemo || demo || !challengeId) return
 
@@ -157,21 +278,16 @@ function ChallengeFinishedPage() {
         console.warn('Error loading existing Finished Look rows:', error.message)
       }
 
-      // Split mannequin vs model by folder naming convention.
+      // Find most recent mannequin path by folder naming convention
       if (!cancelled && rows && rows.length) {
-        let mannequin = ''
-        let model = ''
-
         for (const r of rows) {
           const p = r?.image_url || ''
-          const full = p.startsWith('http') ? p : STORAGE_PREFIX + p
-          if (!mannequin && p.includes('finished-mannequin')) mannequin = full
-          if (!model && p.includes('finished-model')) model = full
-          if (mannequin && model) break
+          if (p.includes('finished-mannequin')) {
+            const full = p.startsWith('http') ? p : STORAGE_PREFIX + p
+            setExistingMannequinUrl(full)
+            break
+          }
         }
-
-        if (mannequin) setExistingMannequinUrl(mannequin)
-        if (model) setExistingModelUrl(model)
       }
 
       // 2) Storage fallback (mannequin)
@@ -191,24 +307,6 @@ function ChallengeFinishedPage() {
           console.warn('Finished mannequin storage fallback error:', err)
         }
       }
-
-      // 3) Storage fallback (model)
-      if (!cancelled) {
-        try {
-          const folder = `${user.id}/finished-model`
-          const { data: files, error: listError } = await supabase.storage
-            .from('uploads')
-            .list(folder, { limit: 50 })
-
-          if (!listError && files && files.length > 0) {
-            const latestFile = files[files.length - 1]
-            const path = `${folder}/${latestFile.name}`
-            if (!existingModelUrl) setExistingModelUrl(STORAGE_PREFIX + path)
-          }
-        } catch (err) {
-          console.warn('Finished model storage fallback error:', err)
-        }
-      }
     }
 
     loadLatestFinished()
@@ -219,25 +317,13 @@ function ChallengeFinishedPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, adminDemo, demo, challengeId])
 
-  const handleMannequinChange = (fileObj) => {
-    setFileMannequin(fileObj || null)
-    setPreviewMannequin(fileObj ? URL.createObjectURL(fileObj) : '')
-    setUploadMessage('')
-  }
-
-  const handleModelChange = (fileObj) => {
-    setFileModel(fileObj || null)
-    setPreviewModel(fileObj ? URL.createObjectURL(fileObj) : '')
-    setUploadMessage('')
-  }
-
   // Revoke object URLs on unmount
   useEffect(() => {
     return () => {
       if (previewMannequin) URL.revokeObjectURL(previewMannequin)
-      if (previewModel) URL.revokeObjectURL(previewModel)
+      if (rawMannequinUrl) URL.revokeObjectURL(rawMannequinUrl)
     }
-  }, [previewMannequin, previewModel])
+  }, [previewMannequin, rawMannequinUrl])
 
   // -------- Derive Finished assets from challenge JSON --------
   const stepConfig = (() => {
@@ -245,9 +331,7 @@ function ChallengeFinishedPage() {
     const steps = Array.isArray(challenge.steps) ? challenge.steps : []
     if (!steps.length) return null
 
-    // ✅ stepNumber can be stored as a string in JSONB ("4"), so normalize.
     const byNumber = steps.find((s) => Number(s.stepNumber) === 4)
-
     return byNumber || steps[3] || steps[steps.length - 1] || steps[0]
   })()
 
@@ -255,33 +339,27 @@ function ChallengeFinishedPage() {
     stepConfig?.videoUrl ||
     'https://player.vimeo.com/video/1138763970?badge=0&autopause=0&player_id=0&app_id=58479'
 
-  // Raw value from DB (can be /storage/... or full https://... or /public/... fallback)
   const referenceImageUrlRaw =
     stepConfig?.referenceImageUrl || '/style_one/finished_reference.jpeg'
 
-  // ✅ If DB stores /storage/... paths, prefix with Supabase project URL so the browser loads it correctly.
   const referenceImageUrl =
     typeof referenceImageUrlRaw === 'string' &&
     referenceImageUrlRaw.startsWith('/storage/')
       ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}${referenceImageUrlRaw}`
       : referenceImageUrlRaw
 
-  // ✅ DEMO "Your Version" images (single placeholder asset, per your Finder screenshot)
-  // File exists at: public/demo/images/stylist_finished_reference.jpeg
+  // ✅ DEMO mannequin placeholder
   const demoYourMannequinUrl = '/demo/images/stylist_finished_reference.jpeg'
-  const demoYourModelUrl = '/demo/images/stylist_finished_reference.jpeg'
-
-  // ✅ DEMO video placeholder image (same placeholder card pattern as Step 3)
   const demoVideoPlaceholderUrl = '/demo/images/video_placeholder_finished.jpeg'
 
-  // -------- Upload handler --------
+  // -------- Upload handler (mannequin only, cropped only) --------
   const handleUpload = async (e) => {
     e.preventDefault()
     if (uploading) return
 
     // ✅ DEMO: no uploads; just proceed
     if (demo) {
-      setUploadMessage('✅ Demo mode: using the demo finished look images.')
+      setUploadMessage('✅ Demo mode: using the demo finished look mannequin image.')
       setShowOptions(true)
       return
     }
@@ -316,70 +394,40 @@ function ChallengeFinishedPage() {
 
       const userId = user?.id || 'demo-user'
 
-      // If no new mannequin, keep existing
       let mannequinPath = null
+
       if (fileMannequin) {
         const filePath = makeUploadPath(userId, 'finished-mannequin', fileMannequin)
-        const { data, error } = await supabase.storage
-          .from('uploads')
-          .upload(filePath, fileMannequin)
+        const { data, error } = await supabase.storage.from('uploads').upload(filePath, fileMannequin)
 
         if (error) {
           console.error('❌ Storage upload failed (finished mannequin):', error.message)
           setUploadMessage('❌ Upload failed: ' + error.message)
           return
         }
+
         mannequinPath = data?.path || filePath
       }
 
-      let modelPath = null
-      if (fileModel) {
-        const filePath = makeUploadPath(userId, 'finished-model', fileModel)
-        const { data, error } = await supabase.storage
-          .from('uploads')
-          .upload(filePath, fileModel)
-
-        if (error) {
-          console.error('❌ Storage upload failed (finished model):', error.message)
-          setUploadMessage('❌ Upload failed: ' + error.message)
-          return
-        }
-        modelPath = data?.path || filePath
-      }
-
       // DB insert only for real users
-      if (!adminDemo && user && challengeId) {
-        const rows = []
-        if (mannequinPath) {
-          rows.push({
+      if (!adminDemo && user && challengeId && mannequinPath) {
+        const { error: dbError } = await supabase.from('uploads').insert([
+          {
             user_id: user.id,
             step_number: 4,
             image_url: mannequinPath,
             challenge_id: challengeId,
-          })
-        }
-        if (modelPath) {
-          rows.push({
-            user_id: user.id,
-            step_number: 4,
-            image_url: modelPath,
-            challenge_id: challengeId,
-          })
-        }
+          },
+        ])
 
-        if (rows.length) {
-          const { error: dbError } = await supabase.from('uploads').insert(rows)
-          if (dbError) {
-            console.error('⚠️ DB insert error (finished):', dbError.message)
-            setUploadMessage('✅ File saved, but DB error: ' + dbError.message)
-            return
-          }
+        if (dbError) {
+          console.error('⚠️ DB insert error (finished mannequin):', dbError.message)
+          setUploadMessage('✅ File saved, but DB error: ' + dbError.message)
+          return
         }
       }
 
-      // update UI for newly uploaded items
       if (mannequinPath) setExistingMannequinUrl(STORAGE_PREFIX + mannequinPath)
-      if (modelPath) setExistingModelUrl(STORAGE_PREFIX + modelPath)
 
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
@@ -391,8 +439,6 @@ function ChallengeFinishedPage() {
   const resetUpload = () => {
     setFileMannequin(null)
     setPreviewMannequin('')
-    setFileModel(null)
-    setPreviewModel('')
     setUploadMessage('')
     setShowOptions(false)
     setNavigating(false)
@@ -434,7 +480,7 @@ function ChallengeFinishedPage() {
     )
   }
 
-  // -------- Styles (carry over Step 3 card + formatting) --------
+  // -------- Styles --------
   const overlayFrame = {
     position: 'relative',
     width: '100%',
@@ -469,7 +515,6 @@ function ChallengeFinishedPage() {
     border: '3px solid rgba(255, 255, 255, 0.9)',
   }
 
-  // --- Demo placeholder container formatting (EXACT same pattern as Step 3) ---
   const placeholderFrame = {
     background: '#fff',
     borderRadius: 12,
@@ -508,10 +553,7 @@ function ChallengeFinishedPage() {
   }
 
   const mannequinSrc = demo ? demoYourMannequinUrl : previewMannequin || existingMannequinUrl
-  const modelSrc = demo ? demoYourModelUrl : previewModel || existingModelUrl
-
   const hasMannequin = !!mannequinSrc
-  const hasModel = !!modelSrc
 
   return (
     <main
@@ -526,6 +568,128 @@ function ChallengeFinishedPage() {
         minHeight: '100vh',
       }}
     >
+      {/* ✅ Crop modal */}
+      {isCropOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.82)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              background: '#111',
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.12)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
+            }}
+          >
+            <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
+              <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
+                Drag to centre. Pinch or use the slider to zoom until the style fills the oval guide.
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', width: '100%', height: 420, background: '#000' }}>
+              <Cropper
+                image={rawMannequinUrl}
+                crop={crop}
+                zoom={zoom}
+                aspect={3 / 4}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+                restrictPosition={false}
+                objectFit="cover"
+              />
+
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '78%',
+                    height: '74%',
+                    borderRadius: '50%',
+                    border: '3px solid rgba(255,255,255,0.9)',
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.01"
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  style={{ width: '70%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+                <button
+                  onClick={cancelCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: '#000',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={confirmCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1.2,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: '#28a745',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                    opacity: cropping ? 0.85 : 1,
+                  }}
+                >
+                  {cropping ? 'Saving…' : 'Use this crop'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Logo */}
       <div style={{ marginBottom: '1.25rem' }}>
         <Image
@@ -543,8 +707,7 @@ function ChallengeFinishedPage() {
       <p style={{ marginBottom: '1rem', fontSize: '1rem', color: '#ddd', lineHeight: 1.5 }}>
         This is your final step! Capture your very best work.
         <br />
-        A clear mannequin photo completes the challenge, and an optional in-real-life model photo turns your
-        style into a powerful portfolio image.
+        A clear mannequin photo completes the challenge.
       </p>
 
       <hr
@@ -600,7 +763,7 @@ function ChallengeFinishedPage() {
         )}
       </div>
 
-      {/* Compare (includes Real Model panel) */}
+      {/* Compare */}
       <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
         Compare Your Work
       </h3>
@@ -664,30 +827,6 @@ function ChallengeFinishedPage() {
             )}
           </div>
         </div>
-
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <p>
-            <strong>Your Model Photo</strong>
-            <br />
-            <span style={{ fontSize: '0.85rem', color: '#bbb' }}>(Optional)</span>
-          </p>
-          <div style={overlayFrame}>
-            {hasModel ? (
-              <img src={modelSrc} alt="Your Finished Look (Real Model)" style={previewImageStyle} />
-            ) : (
-              <div
-                style={{
-                  ...previewImageStyle,
-                  background: 'radial-gradient(circle at 30% 20%, #777 0, #444 55%, #222 100%)',
-                }}
-              />
-            )}
-          </div>
-
-          <p style={{ marginTop: 8, fontSize: '0.9rem', color: '#bbb' }}>
-            Optional — adds to your portfolio.
-          </p>
-        </div>
       </div>
 
       {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
@@ -715,34 +854,7 @@ function ChallengeFinishedPage() {
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={(e) => handleMannequinChange(e.target.files[0])}
-              style={{ display: 'none' }}
-            />
-          </label>
-
-          <div style={{ height: 10 }} />
-
-          <label
-            style={{
-              display: 'inline-block',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: '#f5f5f5',
-              color: '#000',
-              borderRadius: 999,
-              border: '2px solid #000',
-              fontSize: '1rem',
-              cursor: 'pointer',
-              textAlign: 'center',
-              marginBottom: '0.75rem',
-              fontWeight: 600,
-            }}
-          >
-            📸 Finished Look (Real Model) — Optional
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => handleModelChange(e.target.files[0])}
+              onChange={(e) => openCropperForFile(e.target.files[0])}
               style={{ display: 'none' }}
             />
           </label>
@@ -756,7 +868,7 @@ function ChallengeFinishedPage() {
               marginBottom: '1rem',
             }}
           >
-            The mannequin photo is required to complete the challenge. The real model photo is optional.
+            The mannequin photo is required to complete the challenge.
           </p>
 
           <button
