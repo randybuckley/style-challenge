@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+/* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
+
+import { useEffect, useState, Suspense, useCallback } from 'react'
 import Image from 'next/image'
+import Cropper from 'react-easy-crop'
 import { supabase } from '../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../lib/uploadPath'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -9,17 +12,78 @@ import { useRouter, useSearchParams } from 'next/navigation'
 const STORAGE_PREFIX =
   'https://sifluvnvdgszfchtudkv.supabase.co/storage/v1/object/public/uploads/'
 
+// -------------------- Crop + image helpers --------------------
+function createImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.addEventListener('load', () => resolve(image))
+    image.addEventListener('error', (err) => reject(err))
+    image.setAttribute('crossOrigin', 'anonymous')
+    image.src = url
+  })
+}
+
+async function getCroppedBlob(imageSrc, croppedAreaPixels, { quality = 0.92 } = {}) {
+  const image = await createImage(imageSrc)
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context not available')
+
+  const { width, height, x, y } = croppedAreaPixels
+
+  canvas.width = Math.max(1, Math.floor(width))
+  canvas.height = Math.max(1, Math.floor(height))
+
+  ctx.drawImage(image, x, y, width, height, 0, 0, canvas.width, canvas.height)
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return reject(new Error('Image crop failed (no blob).'))
+        resolve(blob)
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
+function guessFileName(originalName = 'photo.jpg') {
+  const base = originalName.replace(/\.[^/.]+$/, '')
+  return `${base}_cropped.jpg`
+}
+
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return ''
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1) return `${mb.toFixed(2)} MB`
+  const kb = bytes / 1024
+  return `${kb.toFixed(0)} KB`
+}
+
 function ChallengeStep3Inner() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const [file, setFile] = useState(null)
+  const [file, setFile] = useState(null) // cropped file (judging/UI)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploadMessage, setUploadMessage] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [showOptions, setShowOptions] = useState(false)
   const [adminDemo, setAdminDemo] = useState(false)
   const [uploading, setUploading] = useState(false)
+
+  // ✅ Cropper state (cropped-only pipeline)
+  const [isCropOpen, setIsCropOpen] = useState(false)
+  const [rawSelectedUrl, setRawSelectedUrl] = useState('') // object URL of the selected photo
+  const [rawSelectedName, setRawSelectedName] = useState('photo.jpg')
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
+  const [cropping, setCropping] = useState(false)
+
+  // ---- Upload guardrails ----
+  const MAX_INPUT_BYTES = 20 * 1024 * 1024 // 20 MB
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -61,9 +125,7 @@ function ChallengeStep3Inner() {
       const row = data?.[0]
       if (row?.image_url) {
         const path = row.image_url
-        const fullUrl = path.startsWith('http')
-          ? path
-          : `${STORAGE_PREFIX}${path}`
+        const fullUrl = path.startsWith('http') ? path : `${STORAGE_PREFIX}${path}`
 
         setImageUrl(fullUrl)
         setShowOptions(false)
@@ -74,16 +136,100 @@ function ChallengeStep3Inner() {
     loadExisting()
   }, [user, adminDemo])
 
-  const handleFileChange = (fileObj) => {
-    setFile(fileObj || null)
-    setPreviewUrl(fileObj ? URL.createObjectURL(fileObj) : '')
-    setUploadMessage('')
+  // ✅ Crop callbacks
+  const onCropComplete = useCallback((_croppedArea, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels)
+  }, [])
+
+  const openCropperForFile = (fileObj) => {
+    if (!fileObj) return
+
+    if (fileObj.size > MAX_INPUT_BYTES) {
+      setUploadMessage(
+        `❌ That file is ${formatBytes(fileObj.size)}. Please choose a smaller photo (max ${formatBytes(
+          MAX_INPUT_BYTES
+        )}).`
+      )
+      return
+    }
+
+    // ✅ revoke previous raw object URL before replacing
+    if (rawSelectedUrl) {
+      try {
+        URL.revokeObjectURL(rawSelectedUrl)
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    const objUrl = URL.createObjectURL(fileObj)
+    setRawSelectedUrl(objUrl)
+    setRawSelectedName(fileObj.name || 'photo.jpg')
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
+    setIsCropOpen(true)
   }
 
-  // Revoke previous object URL
+  const handleFileChange = (fileObj) => {
+    setUploadMessage('')
+    setShowOptions(false)
+
+    if (!fileObj) {
+      setFile(null)
+      setPreviewUrl('')
+      return
+    }
+
+    openCropperForFile(fileObj)
+  }
+
+  const confirmCrop = async () => {
+    if (!rawSelectedUrl || !croppedAreaPixels) {
+      setIsCropOpen(false)
+      return
+    }
+
+    try {
+      setCropping(true)
+
+      const blob = await getCroppedBlob(rawSelectedUrl, croppedAreaPixels, { quality: 0.92 })
+
+      const croppedFile = new File([blob], guessFileName(rawSelectedName), {
+        type: 'image/jpeg',
+      })
+
+      setFile(croppedFile)
+
+      const newPreview = URL.createObjectURL(croppedFile)
+      setPreviewUrl(newPreview)
+
+      setUploadMessage('✅ Photo adjusted. Now confirm to upload.')
+      setIsCropOpen(false)
+    } catch (err) {
+      console.error(err)
+      setUploadMessage('❌ Could not crop that image. Please try again.')
+      setIsCropOpen(false)
+    } finally {
+      setCropping(false)
+    }
+  }
+
+  const cancelCrop = () => {
+    setIsCropOpen(false)
+  }
+
+  // ✅ Revoke ONLY previewUrl in cleanup.
+  // Do NOT revoke rawSelectedUrl here — it can be needed during upload work.
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (previewUrl) {
+        try {
+          URL.revokeObjectURL(previewUrl)
+        } catch (e) {
+          // ignore
+        }
+      }
     }
   }, [previewUrl])
 
@@ -128,12 +274,12 @@ function ChallengeStep3Inner() {
       setUploadMessage('Uploading…')
 
       const userId = user?.id || 'demo-user'
+
+      // ✅ Upload cropped/judging image ONLY
       const filePath = makeUploadPath(userId, 'step3', file)
 
       if (file) {
-        const { error: storageError } = await supabase.storage
-          .from('uploads')
-          .upload(filePath, file)
+        const { error: storageError } = await supabase.storage.from('uploads').upload(filePath, file)
 
         if (storageError) {
           console.error('❌ Storage upload failed (step3):', storageError.message)
@@ -163,6 +309,15 @@ function ChallengeStep3Inner() {
       setShowOptions(true)
     } finally {
       setUploading(false)
+
+      // ✅ Safe place to revoke the raw object URL — upload work is finished.
+      if (rawSelectedUrl) {
+        try {
+          URL.revokeObjectURL(rawSelectedUrl)
+        } catch (e) {
+          // ignore
+        }
+      }
     }
   }
 
@@ -172,6 +327,15 @@ function ChallengeStep3Inner() {
     setImageUrl('')
     setUploadMessage('')
     setShowOptions(false)
+
+    if (rawSelectedUrl) {
+      try {
+        URL.revokeObjectURL(rawSelectedUrl)
+      } catch (e) {
+        // ignore
+      }
+    }
+    setRawSelectedUrl('')
   }
 
   const proceedToNextStep = () => {
@@ -208,7 +372,6 @@ function ChallengeStep3Inner() {
     justifyContent: 'center',
   }
 
-  // 🔧 Changed: remove huge outline overlay, use a simple border like Finished page
   const oval = {
     width: '88%',
     height: '78%',
@@ -232,88 +395,164 @@ function ChallengeStep3Inner() {
         boxSizing: 'border-box',
       }}
     >
+      {/* ✅ Crop modal */}
+      {isCropOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.82)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              background: '#111',
+              borderRadius: 14,
+              border: '1px solid rgba(255,255,255,0.12)',
+              overflow: 'hidden',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.55)',
+            }}
+          >
+            <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>Adjust your photo</div>
+              <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: 6 }}>
+                Drag to centre. Pinch or use the slider to zoom until the style fills the oval guide.
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', width: '100%', height: 420, background: '#000' }}>
+              <Cropper
+                image={rawSelectedUrl}
+                crop={crop}
+                zoom={zoom}
+                aspect={3 / 4}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+                restrictPosition={false}
+                objectFit="cover"
+              />
+
+              {/* Oval guide overlay (visual only) */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    width: '78%',
+                    height: '74%',
+                    borderRadius: '50%',
+                    border: '3px solid rgba(255,255,255,0.9)',
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.35)',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '1rem' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '0.9rem', color: '#bbb', minWidth: 44 }}>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.01"
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  style={{ width: '70%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 14 }}>
+                <button
+                  type="button"
+                  onClick={cancelCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: '#000',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmCrop}
+                  disabled={cropping}
+                  style={{
+                    flex: 1.2,
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: '#28a745',
+                    color: '#fff',
+                    fontWeight: 800,
+                    cursor: cropping ? 'not-allowed' : 'pointer',
+                    opacity: cropping ? 0.85 : 1,
+                  }}
+                >
+                  {cropping ? 'Saving…' : 'Use this crop'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Logo */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <Image
-          src="/logo.jpeg"
-          alt="Style Challenge Logo"
-          width={240}
-          height={0}
-          style={{ height: 'auto', maxWidth: '100%' }}
-          priority
-        />
+        <Image src="/logo.jpeg" alt="Style Challenge Logo" width={240} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Step 3: Final Touch</h1>
-      <hr
-        style={{
-          width: '50%',
-          margin: '0.5rem auto 1rem auto',
-          border: '0.5px solid #666',
-        }}
-      />
-      <p
-        style={{
-          marginBottom: '2rem',
-          fontSize: '1rem',
-          color: '#ddd',
-        }}
-      >
+      <hr style={{ width: '50%', margin: '0.5rem auto 1rem auto', border: '0.5px solid #666' }} />
+      <p style={{ marginBottom: '2rem', fontSize: '1rem', color: '#ddd' }}>
         Watch Patrick’s demo for Step&nbsp;3, then capture your final working image.
       </p>
 
-{/* Video */}
-<div
-  style={{
-    marginBottom: '2rem',
-    width: '100%',
-    position: 'relative',
-    paddingTop: '56.25%', // 16:9
-  }}
->
-  <iframe
-    src="https://player.vimeo.com/video/1138769636?badge=0&autopause=0&player_id=0&app_id=58479"
-    style={{
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      border: '2px solid #555',
-      borderRadius: '6px',
-    }}
-    frameBorder="0"
-    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
-    referrerPolicy="strict-origin-when-cross-origin"
-    allowFullScreen
-    title="SC style 1 Step 3"
-  />
-</div>
+      {/* Video */}
+      <div style={{ marginBottom: '2rem', width: '100%', position: 'relative', paddingTop: '56.25%' }}>
+        <iframe
+          src="https://player.vimeo.com/video/1138769636?badge=0&autopause=0&player_id=0&app_id=58479"
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: '2px solid #555', borderRadius: '6px' }}
+          frameBorder="0"
+          allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allowFullScreen
+          title="SC style 1 Step 3"
+        />
+      </div>
 
       {/* Compare section */}
-      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>
-        Compare Your Work
-      </h3>
-      <div
-        style={{
-          display: 'flex',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          textAlign: 'center',
-          marginBottom: '2rem',
-        }}
-      >
+      <h3 style={{ fontSize: '1.3rem', marginBottom: '1rem', marginTop: '2rem' }}>Compare Your Work</h3>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', textAlign: 'center', marginBottom: '2rem' }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <p>
             <strong>Patrick’s Version</strong>
           </p>
           <div style={overlayFrame}>
-            <img
-              src="/style_one/step3_reference.jpeg"
-              alt="Patrick Version Step 3"
-              style={previewImageStyle}
-            />
+            <img src="/style_one/step3_reference.jpeg" alt="Patrick Version Step 3" style={previewImageStyle} />
           </div>
         </div>
 
@@ -323,17 +562,12 @@ function ChallengeStep3Inner() {
           </p>
           <div style={overlayFrame}>
             {hasImage ? (
-              <img
-                src={previewUrl || imageUrl}
-                alt="Your Version Step 3"
-                style={previewImageStyle}
-              />
+              <img src={previewUrl || imageUrl} alt="Your Version Step 3" style={previewImageStyle} />
             ) : (
               <div
                 style={{
                   ...previewImageStyle,
-                  background:
-                    'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
+                  background: 'radial-gradient(circle at 30% 20%, #444 0, #111 60%, #000 100%)',
                 }}
               />
             )}
@@ -343,22 +577,40 @@ function ChallengeStep3Inner() {
             </div>
 
             {!hasImage && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 14,
-                  left: 0,
-                  right: 0,
-                  color: '#fff',
-                  fontSize: '0.9rem',
-                  textAlign: 'center',
-                  opacity: 0.9,
-                }}
-              >
+              <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, color: '#fff', fontSize: '0.9rem', textAlign: 'center', opacity: 0.9 }}>
                 Hold phone upright — fill the oval
               </div>
             )}
           </div>
+
+          {!!previewUrl && !adminDemo && !showOptions && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!rawSelectedUrl) {
+                  setUploadMessage('Please choose a photo again to adjust the crop.')
+                  return
+                }
+                setUploadMessage('')
+                setCrop({ x: 0, y: 0 })
+                setZoom(1)
+                setCroppedAreaPixels(null)
+                setIsCropOpen(true)
+              }}
+              style={{
+                marginTop: 12,
+                padding: '0.6rem 1rem',
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: '#111',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Adjust crop
+            </button>
+          )}
 
           {uploadMessage && <p style={{ marginTop: 8 }}>{uploadMessage}</p>}
         </div>
@@ -383,28 +635,11 @@ function ChallengeStep3Inner() {
             }}
           >
             📸 Take Photo / Choose Photo (Portrait)
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => handleFileChange(e.target.files[0])}
-              style={{ display: 'none' }}
-            />
+            <input type="file" accept="image/*" capture="environment" onChange={(e) => handleFileChange(e.target.files[0])} style={{ display: 'none' }} />
           </label>
 
-          <p
-            style={{
-              marginTop: '0.75rem',
-              fontSize: '1rem',
-              color: '#fff',
-              lineHeight: '1.4',
-              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
-              marginBottom: '1rem',
-            }}
-          >
-            Your photo preview is shown above. Compare carefully with Patrick’s
-            version and only confirm if this image shows your{' '}
-            <strong>best work</strong>.
+          <p style={{ marginTop: '0.75rem', fontSize: '1rem', color: '#fff', lineHeight: '1.4', textShadow: '0 0 3px rgba(0, 0, 0, 0.5)', marginBottom: '1rem' }}>
+            Your photo preview is shown above. Compare carefully with Patrick’s version and only confirm if this image shows your <strong>best work</strong>.
           </p>
 
           <button
@@ -424,45 +659,16 @@ function ChallengeStep3Inner() {
               opacity: uploading ? 0.8 : 1,
             }}
           >
-            {uploading
-              ? 'Uploading…'
-              : '✅ Confirm, Add to Portfolio & Go to Finished Look'}
+            {uploading ? 'Uploading…' : '✅ Confirm, Add to Portfolio & Go to Finished Look'}
           </button>
         </form>
       )}
 
       {(showOptions || adminDemo) && (
-        <div
-          style={{
-            marginTop: '3rem',
-            padding: '1.5rem',
-            border: '2px solid #28a745',
-            borderRadius: '8px',
-            background: 'rgba(40, 167, 69, 0.1)',
-            textAlign: 'center',
-          }}
-        >
-          <h2
-            style={{
-              color: '#28a745',
-              fontSize: '1.5rem',
-              marginBottom: '0.75rem',
-              fontWeight: '700',
-            }}
-          >
-            🌟 Step 3 Complete!
-          </h2>
-          <p
-            style={{
-              fontSize: '1.1rem',
-              color: '#fff',
-              lineHeight: '1.5',
-              textShadow: '0 0 3px rgba(0, 0, 0, 0.5)',
-              marginBottom: '1rem',
-            }}
-          >
-            Does this final step show your <strong>best work</strong>? If yes,
-            you’re ready to finish strong with the Completed Look.
+        <div style={{ marginTop: '3rem', padding: '1.5rem', border: '2px solid #28a745', borderRadius: '8px', background: 'rgba(40, 167, 69, 0.1)', textAlign: 'center' }}>
+          <h2 style={{ color: '#28a745', fontSize: '1.5rem', marginBottom: '0.75rem', fontWeight: '700' }}>🌟 Step 3 Complete!</h2>
+          <p style={{ fontSize: '1.1rem', color: '#fff', lineHeight: '1.5', textShadow: '0 0 3px rgba(0, 0, 0, 0.5)', marginBottom: '1rem' }}>
+            Does this final step show your <strong>best work</strong>? If yes, you’re ready to finish strong with the Completed Look.
           </p>
 
           <button
