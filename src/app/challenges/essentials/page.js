@@ -99,12 +99,13 @@ export default function EssentialsCollectionPage() {
         if (cancelled) return;
         setUser(sessionUser);
 
-        // 2) Entitlement
+        // 2) Entitlement (IMPORTANT: must be active)
         const { data: entRows, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
+          .eq('is_active', true)
           .limit(1);
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
@@ -290,11 +291,11 @@ export default function EssentialsCollectionPage() {
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
               <div style={{ color: '#e5e7eb', fontSize: '0.92rem' }}>
-                You can browse the Essentials collection, but you’ll need to unlock Pro to launch Essentials styles and submit for certification.
+                Essentials styles are Pro-only. If you already have Pro access, use the unlock page to refresh your access.
               </div>
               <div style={{ marginTop: 12 }}>
-                <Link href="/challenges/redeem" style={redeemButton}>
-                  Redeem a promo code
+                <Link href="/challenges/redeem" style={unlockButton}>
+                  Unlock Pro access
                 </Link>
               </div>
             </div>
@@ -337,7 +338,7 @@ export default function EssentialsCollectionPage() {
                     <div style={{ marginTop: 10 }}>
                       {launchBlocked ? (
                         <Link href="/challenges/redeem" style={lockedCta}>
-                          Locked — redeem code
+                          Locked — unlock Pro
                         </Link>
                       ) : (
                         <Link href={s.launchHref} style={launchCta}>
@@ -433,7 +434,7 @@ const nonProCard = {
   textAlign: 'center',
 };
 
-const redeemButton = {
+const unlockButton = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',

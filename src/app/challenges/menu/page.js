@@ -90,12 +90,13 @@ export default function ChallengesMenuPage() {
         if (cancelled) return;
         setUser(sessionUser);
 
-        // Pro entitlement
+        // Pro entitlement (IMPORTANT: must be active)
         const { data: entitlements, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
+          .eq('is_active', true) // ✅ ONLY CHANGE: do not treat inactive rows as PRO
           .limit(1);
 
         if (!cancelled) setIsPro(!entErr && !!entitlements?.length);
@@ -246,7 +247,9 @@ export default function ChallengesMenuPage() {
 
   const essentialsAllCompleteAndApproved =
     essentialsSlugs.length > 0 &&
-    essentialsSlugs.every((slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved');
+    essentialsSlugs.every(
+      (slug) => portfolioStatus[slug] === 'complete' && certificateStatus[slug] === 'approved'
+    );
 
   const essentialsAnyStarted =
     essentialsSlugs.length > 0 && essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');

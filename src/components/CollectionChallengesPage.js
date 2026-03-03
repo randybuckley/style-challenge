@@ -107,18 +107,19 @@ export default function CollectionChallengesPage({
         if (cancelled) return;
         setUser(sessionUser);
 
-        // 2) Entitlement (Pro)
+        // 2) Entitlement (Pro) — IMPORTANT: must be active
         const { data: entRows, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
+          .eq('is_active', true) // ✅ do not treat inactive rows as PRO
           .limit(1);
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
         // 3) Load challenges for THIS collection (DB-driven)
-        // Uses public.challenges.collection_slug (verified via your SQL: none null)
+        // Uses public.challenges.collection_slug
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, steps, sort_order, thumbnail_url, collection_slug')
@@ -278,7 +279,9 @@ export default function CollectionChallengesPage({
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
           <div style={identityRow}>
             <SignedInAs style={identityPill} />
-            <span style={isPro ? proBadge : lockedBadge}>{isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}</span>
+            <span style={isPro ? proBadge : lockedBadge}>
+              {isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}
+            </span>
           </div>
         </div>
 
@@ -296,11 +299,14 @@ export default function CollectionChallengesPage({
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
               <div style={{ color: '#e5e7eb', fontSize: '0.92rem' }}>
-                You can browse this collection, but you’ll need to unlock Pro to launch styles and submit for certification.
+                You can browse this collection, but you’ll need to unlock Pro to launch styles and submit for
+                certification.
+                <br />
+                If you already have Pro access, go to the unlock page and use “Refresh access”.
               </div>
               <div style={{ marginTop: 12 }}>
                 <Link href="/challenges/redeem" style={redeemButton}>
-                  Redeem a promo code
+                  Unlock Pro access
                 </Link>
               </div>
             </div>
@@ -343,7 +349,7 @@ export default function CollectionChallengesPage({
                     <div style={{ marginTop: 10 }}>
                       {launchBlocked ? (
                         <Link href="/challenges/redeem" style={lockedCta}>
-                          Locked — redeem code
+                          Locked — unlock Pro
                         </Link>
                       ) : (
                         <Link href={s.launchHref} style={launchCta}>

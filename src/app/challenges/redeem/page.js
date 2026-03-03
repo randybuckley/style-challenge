@@ -2,8 +2,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabaseClient'
 import SignedInAs from '../../../components/SignedInAs'
 
@@ -12,25 +13,42 @@ export default function RedeemPage() {
 
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [isPro, setIsPro] = useState(false)
+
   const [code, setCode] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     const load = async () => {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const sessionUser = sessionData?.session?.user || null
+      setLoading(true)
 
-      if (!sessionUser) {
-        router.replace(`/welcome-back?next=${encodeURIComponent('/challenges/redeem')}`)
-        return
-      }
+      try {
+        const { data: sessionData, error: sessionErr } =
+          await supabase.auth.getSession()
 
-      if (!cancelled) {
+        if (sessionErr) {
+          console.warn('[redeem] session error:', sessionErr.message)
+        }
+
+        const sessionUser = sessionData?.session?.user || null
+
+        if (!sessionUser) {
+          router.replace(
+            `/welcome-back?next=${encodeURIComponent('/challenges/redeem')}`
+          )
+          return
+        }
+
+        if (cancelled) return
         setUser(sessionUser)
-        setLoading(false)
+
+        await checkEntitlement(sessionUser.id)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
 
@@ -40,106 +58,104 @@ export default function RedeemPage() {
     }
   }, [router])
 
-  const handleSubmit = async (e) => {
+  const checkEntitlement = async (userId) => {
+    const { data: entRows, error: entErr } = await supabase
+      .from('user_entitlements')
+      .select('tier')
+      .eq('user_id', userId)
+      .eq('tier', 'pro')
+      .eq('is_active', true) // ✅ IMPORTANT: must be active to count as PRO
+      .limit(1)
+
+    if (entErr) {
+      console.warn('[redeem] entitlement check error:', entErr.message)
+    }
+
+    setIsPro(!entErr && !!entRows?.length)
+  }
+
+  const refreshAccess = async () => {
+    if (!user) return
+    setRefreshing(true)
+    await checkEntitlement(user.id)
+    setRefreshing(false)
+  }
+
+  const onRedeem = async (e) => {
     e.preventDefault()
     setMessage('')
 
-    const cleanCode = code.trim()
+    const trimmed = (code || '').trim().toUpperCase()
 
-    if (!cleanCode) {
-      setMessage('Please enter a promo code.')
+    if (!trimmed) {
+      setMessage('Please enter your promo code.')
       return
     }
 
     if (!user) {
-      setMessage('You must be signed in to redeem a code.')
+      setMessage('You must be signed in to redeem a promo code.')
       return
     }
 
     setSubmitting(true)
 
     try {
-      // 1) Look up promo code
-      const { data: promo, error: promoErr } = await supabase
+      const { data: promoRows, error: promoErr } = await supabase
         .from('promo_codes')
-        .select('id, code, tier, is_active, max_uses, used_count')
-        .eq('code', cleanCode)
-        .maybeSingle()
+        .select('id, is_active, usage_count, usage_limit')
+        .eq('code', trimmed)
+        .limit(1)
 
       if (promoErr) {
-        console.error('promo lookup error:', promoErr)
         setMessage(`Error validating promo code: ${promoErr.message}`)
         return
       }
 
+      const promo = promoRows?.[0]
+
       if (!promo) {
-        setMessage('Invalid promo code.')
+        setMessage('That promo code is not recognised.')
         return
       }
 
       if (!promo.is_active) {
-        setMessage('This promo code is not active.')
+        setMessage('That promo code is not currently active.')
         return
       }
 
-      if (promo.max_uses !== null && promo.used_count >= promo.max_uses) {
-        setMessage('This promo code has reached its usage limit.')
+      const used = Number(promo.usage_count || 0)
+      const limit =
+        promo.usage_limit == null ? null : Number(promo.usage_limit)
+
+      if (limit != null && used >= limit) {
+        setMessage('That promo code has reached its usage limit.')
         return
       }
 
-      // IMPORTANT: user_entitlements enforces tier IN ('free','pro')
-      const tier = (promo.tier || '').toLowerCase()
-      if (tier !== 'free' && tier !== 'pro') {
-        setMessage(
-          `Promo code tier is invalid in DB: "${promo.tier}". Must be "free" or "pro".`
+      // ✅ IMPORTANT: set is_active true so PRO gating is consistent everywhere
+      const { error: entErr } = await supabase
+        .from('user_entitlements')
+        .upsert(
+          { user_id: user.id, tier: 'pro', is_active: true },
+          { onConflict: 'user_id,tier' }
         )
-        return
-      }
-
-      // 1.5) Ensure profiles row exists (prevents FK violation on user_entitlements.user_id)
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .upsert({ id: user.id }, { onConflict: 'id' })
-
-      if (profileErr) {
-        console.error('profiles upsert error:', profileErr)
-        setMessage(`Error preparing your account: ${profileErr.message}`)
-        return
-      }
-
-      // 2) Insert user entitlement (matches NOT NULL constraints)
-      const { error: entErr } = await supabase.from('user_entitlements').insert([
-        {
-          user_id: user.id,
-          tier,
-          granted_by_code: promo.code,
-          promo_code_id: promo.id
-          // granted_at defaults to now() in DB
-        }
-      ])
 
       if (entErr) {
-        console.error('entitlement insert error:', entErr)
-        setMessage(`Error assigning entitlement: ${entErr.message}`)
+        setMessage(`Could not unlock access: ${entErr.message}`)
         return
       }
 
-      // 3) Increment usage count (best-effort)
-      const { error: useErr } = await supabase
-        .from('promo_codes')
-        .update({ used_count: (promo.used_count || 0) + 1 })
-        .eq('id', promo.id)
-
-      if (useErr) {
-        console.warn('used_count update error:', useErr)
-        // Don't block user; entitlement already granted
+      try {
+        await supabase
+          .from('promo_codes')
+          .update({ usage_count: used + 1 })
+          .eq('id', promo.id)
+      } catch (err) {
+        console.warn('[redeem] usage_count update failed:', err)
       }
 
-      // 4) Done → go to collections menu
+      setIsPro(true)
       router.replace('/challenges/menu')
-    } catch (err) {
-      console.error(err)
-      setMessage('Something went wrong. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -147,39 +163,18 @@ export default function RedeemPage() {
 
   if (loading) {
     return (
-      <main
-        style={{
-          minHeight: '100vh',
-          background: '#000',
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily:
-            'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
-        }}
-      >
+      <main style={loadingShell}>
         <p>Loading…</p>
       </main>
     )
   }
 
+  if (!user) return null
+
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#000',
-        color: '#e5e7eb',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'flex-start',
-        padding: '2.5rem 1.25rem 3rem',
-        fontFamily:
-          'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
-      }}
-    >
-      <div style={{ width: '100%', maxWidth: 480, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+    <div style={pageShell}>
+      <main style={pageMain}>
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <Image
             src="/logo.jpeg"
             alt="Patrick Cameron Style Challenge"
@@ -190,115 +185,188 @@ export default function RedeemPage() {
           />
         </div>
 
-        {/* Signed-in identity strip */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
-          <SignedInAs
-            style={{
-              fontSize: '0.85rem',
-              color: '#9ca3af',
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.10)',
-              padding: '0.35rem 0.65rem',
-              borderRadius: 999
-            }}
-          />
+        <div style={{ textAlign: 'center', marginBottom: 18 }}>
+          <SignedInAs />
         </div>
 
-        <section
-          style={{
-            borderRadius: 16,
-            background:
-              'radial-gradient(circle at top, #020617 0, #020617 55%, #020617 100%)',
-            border: '1px solid #1f2937',
-            padding: '1.6rem 1.5rem 1.7rem'
-          }}
-        >
-          <h1
-            style={{
-              fontSize: '1.4rem',
-              fontWeight: 600,
-              color: '#f9fafb',
-              marginBottom: '0.5rem',
-              textAlign: 'center'
-            }}
-          >
-            Redeem Promo Code
-          </h1>
+        {isPro ? (
+          <section style={{ textAlign: 'center', maxWidth: 700, margin: '0 auto' }}>
+            <h1 style={title}>You already have Pro access</h1>
 
-          <p
-            style={{
-              fontSize: '0.9rem',
-              lineHeight: 1.6,
-              color: '#d1d5db',
-              marginBottom: '1.4rem',
-              textAlign: 'center'
-            }}
-          >
-            Enter your promo code from Access Long Hair TV or one of our partner salons or
-            colleges to unlock the Patrick Cameron Style Challenge collections.
-          </p>
-
-          <form
-            onSubmit={handleSubmit}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
-              width: '100%'
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Enter your promo code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              style={{
-                padding: '0.75rem 0.9rem',
-                borderRadius: 10,
-                border: '1px solid #374151',
-                background: '#f9fafb',
-                color: '#111827',
-                fontSize: '0.95rem',
-                boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
-                outline: 'none'
-              }}
-            />
-
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{
-                padding: '0.8rem 1rem',
-                borderRadius: 999,
-                background: submitting
-                  ? '#15803d'
-                  : 'linear-gradient(135deg, #22c55e, #16a34a, #22c55e)',
-                color: '#0b1120',
-                border: 'none',
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                fontWeight: 700,
-                fontSize: '0.95rem',
-                boxShadow: '0 12px 30px rgba(34,197,94,0.38)'
-              }}
-            >
-              {submitting ? 'Redeeming…' : 'Redeem code'}
-            </button>
-          </form>
-
-          {message && (
-            <p
-              style={{
-                marginTop: '1rem',
-                fontSize: '0.85rem',
-                color: '#e5e7eb',
-                textAlign: 'center'
-              }}
-            >
-              {message}
+            <p style={introText}>
+              Your account is fully unlocked.
             </p>
-          )}
-        </section>
-      </div>
-    </main>
+
+            <div style={{ marginTop: 18 }}>
+              <Link href="/challenges/menu" style={primaryButton}>
+                Go to Collections
+              </Link>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <button onClick={refreshAccess} style={secondaryButton}>
+                {refreshing ? 'Checking…' : 'Refresh access'}
+              </button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section style={{ textAlign: 'center', marginBottom: 26 }}>
+              <h1 style={title}>Unlock Pro Access</h1>
+
+              <p style={introText}>
+                Pro access is included with an Access Long Hair subscription.
+              </p>
+
+              <div style={{ marginTop: 14 }}>
+                <a
+                  href="https://www.patrickcameronaccesslonghairtv.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={primaryButton}
+                >
+                  Subscribe to Access Long Hair
+                </a>
+              </div>
+
+              <p style={{ marginTop: 20, color: '#9ca3af', fontSize: '0.9rem' }}>
+                If you have received a promo code from one of our partner salons or colleges,
+                you can enter it below.
+              </p>
+            </section>
+
+            <section style={{ maxWidth: 480, margin: '0 auto' }}>
+              <form onSubmit={onRedeem} style={card}>
+                <label style={label}>Promo code</label>
+
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="Enter promo code"
+                  style={input}
+                />
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  style={accentButton(submitting)}
+                >
+                  {submitting ? 'Checking…' : 'Unlock access'}
+                </button>
+
+                {message && <p style={messageStyle}>{message}</p>}
+
+                <div style={{ marginTop: 18, textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={refreshAccess}
+                    style={secondaryButton}
+                  >
+                    {refreshing ? 'Checking…' : 'Already a subscriber? Refresh access'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
   )
+}
+
+/* ---------- styles ---------- */
+
+const pageShell = {
+  minHeight: '100vh',
+  background: '#000',
+  display: 'flex',
+  justifyContent: 'center',
+}
+
+const pageMain = {
+  width: '100%',
+  maxWidth: 960,
+  padding: '2.5rem 1.25rem 3rem',
+  color: '#e5e7eb',
+  fontFamily:
+    'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+}
+
+const loadingShell = {
+  minHeight: '100vh',
+  background: '#000',
+  color: '#e5e7eb',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+}
+
+const title = {
+  fontSize: '1.9rem',
+  fontWeight: 700,
+}
+
+const introText = {
+  marginTop: 8,
+  lineHeight: 1.6,
+}
+
+const primaryButton = {
+  display: 'inline-block',
+  padding: '0.7rem 1.6rem',
+  borderRadius: 999,
+  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+  color: '#0b1120',
+  fontWeight: 800,
+  textDecoration: 'none',
+}
+
+const secondaryButton = {
+  background: 'transparent',
+  border: '1px solid rgba(255,255,255,0.2)',
+  color: '#e5e7eb',
+  padding: '0.6rem 1.2rem',
+  borderRadius: 999,
+  cursor: 'pointer',
+}
+
+const card = {
+  borderRadius: 16,
+  background: '#020617',
+  border: '1px solid rgba(255,255,255,0.1)',
+  padding: '1.1rem',
+}
+
+const label = {
+  fontWeight: 700,
+  fontSize: '0.85rem',
+}
+
+const input = {
+  width: '100%',
+  marginTop: 8,
+  padding: '0.75rem',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'rgba(255,255,255,0.06)',
+  color: '#f9fafb',
+}
+
+const accentButton = (disabled) => ({
+  marginTop: 12,
+  width: '100%',
+  padding: '0.75rem',
+  borderRadius: 999,
+  border: 'none',
+  background: disabled
+    ? 'rgba(148,163,184,0.2)'
+    : 'linear-gradient(135deg, #facc15, #f59e0b)',
+  color: '#0b1120',
+  fontWeight: 800,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+})
+
+const messageStyle = {
+  marginTop: 10,
+  fontSize: '0.9rem',
 }
