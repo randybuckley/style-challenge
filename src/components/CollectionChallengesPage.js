@@ -24,7 +24,7 @@ export default function CollectionChallengesPage({
   const [isPro, setIsPro] = useState(false);
 
   // Loaded from DB
-  const [collectionChallenges, setCollectionChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url }]
+  const [collectionChallenges, setCollectionChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url, tier, is_pro_only }]
 
   // portfolio: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
@@ -82,6 +82,8 @@ export default function CollectionChallengesPage({
       thumbSrc: resolveAssetUrl(c.thumbnail_url),
       launchHref: `/challenges/${c.slug}/step1`,
       requiredSteps: Array.isArray(c.steps) ? c.steps.length : 4,
+      tier: c.tier,
+      isProOnly: !!c.is_pro_only,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionChallenges, SUPABASE_URL]);
@@ -122,7 +124,7 @@ export default function CollectionChallengesPage({
         // Uses public.challenges.collection_slug
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug, steps, sort_order, thumbnail_url, collection_slug')
+          .select('id, slug, steps, sort_order, thumbnail_url, collection_slug, tier, is_pro_only')
           .eq('collection_slug', collectionSlug)
           .order('sort_order', { ascending: true });
 
@@ -299,8 +301,7 @@ export default function CollectionChallengesPage({
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
               <div style={{ color: '#e5e7eb', fontSize: '0.92rem' }}>
-                You can browse this collection, but you’ll need to unlock Pro to launch styles and submit for
-                certification.
+                Some styles in this collection require Pro to launch and submit for certification.
                 <br />
                 If you already have Pro access, go to the unlock page and use “Refresh access”.
               </div>
@@ -320,7 +321,7 @@ export default function CollectionChallengesPage({
               const p = portfolioPill(s.slug);
               const c = certificatePill(s.slug);
 
-              const launchBlocked = !isPro;
+              const launchBlocked = s.isProOnly && !isPro;
 
               return (
                 <div key={s.slug} style={{ ...tile, opacity: launchBlocked ? 0.85 : 1 }}>
