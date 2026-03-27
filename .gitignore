@@ -48,3 +48,6 @@ node_modules
 .next/
 node_modules/
 .DS_Store
+
+# Sentry Config File
+.env.sentry-build-plugin
