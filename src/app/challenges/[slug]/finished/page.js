@@ -1,5 +1,5 @@
 'use client'
-/* eslint-disable react/no-unescaped-characters, @next/next/no-img-element */
+/* eslint-disable react/no-unescaped-entities, @next/next/no-img-element */
 
 import { useEffect, useState, Suspense, useCallback } from 'react'
 import Image from 'next/image'
@@ -475,7 +475,7 @@ function ChallengeFinishedPage() {
           minHeight: '100vh',
         }}
       >
-        <p>We couldn’t find this challenge.</p>
+        <p>We couldn't find this challenge.</p>
       </main>
     )
   }
@@ -609,7 +609,6 @@ function ChallengeFinishedPage() {
                 onCropChange={setCrop}
                 onZoomChange={setZoom}
                 onCropComplete={onCropComplete}
-                restrictPosition={false}
                 objectFit="cover"
               />
 
@@ -696,7 +695,7 @@ function ChallengeFinishedPage() {
           src="/logo.jpeg"
           alt="Style Challenge Logo"
           width={240}
-          height={0}
+          height={80}
           style={{ height: 'auto', maxWidth: '100%' }}
           priority
         />
@@ -780,7 +779,7 @@ function ChallengeFinishedPage() {
       >
         <div style={{ flex: 1, minWidth: 200 }}>
           <p>
-            <strong>Patrick’s Finished Version</strong>
+            <strong>Patrick's Finished Version</strong>
           </p>
           <div style={overlayFrame}>
             <img src={referenceImageUrl} alt="Patrick Finished Look" style={previewImageStyle} />
@@ -947,7 +946,7 @@ function ChallengeFinishedPage() {
                 minWidth: 200,
               }}
             >
-              🔁 No, I’ll Upload a Better Pic
+              🔁 No, I'll Upload a Better Pic
             </button>
           )}
 
