@@ -15,6 +15,8 @@ export default function HomePage() {
   const [user, setUser] = useState(null)
   const [mounted, setMounted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [activating, setActivating] = useState(false)
+  const [activateMessage, setActivateMessage] = useState('')
 
   const [showInAppWarning, setShowInAppWarning] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -54,6 +56,33 @@ export default function HomePage() {
     let active = true
     setMounted(true)
 
+    // Handle expired or invalid magic link landing on this page
+    try {
+      const hash = window.location.hash
+      if (hash.includes('error_code=otp_expired')) {
+        setMessage('⚠️ Your sign-in link has expired. Enter your email below and we\'ll send a fresh one.')
+      } else if (hash.includes('error=access_denied')) {
+        setMessage('⚠️ That sign-in link isn\'t valid. Enter your email below to get a new one.')
+      }
+      if (hash.includes('error=') || hash.includes('error_code=')) {
+        try {
+          window.history.replaceState(null, '', window.location.pathname)
+        } catch {}
+      }
+    } catch {}
+
+    // Suppress iOS WKWebView unhandled rejection from Supabase's
+    // internal history.replaceState call on expired magic links
+    const handleRejection = (event) => {
+      if (
+        typeof event.reason === 'string' &&
+        event.reason.includes('Object Not Found Matching Id')
+      ) {
+        event.preventDefault()
+      }
+    }
+    window.addEventListener('unhandledrejection', handleRejection)
+
     // In-app browser warning (camera/uploads can break)
     try {
       const ua = navigator.userAgent || ''
@@ -62,7 +91,7 @@ export default function HomePage() {
       setShowInAppWarning(false)
     }
 
-    // If already logged in, backfill PRO (if needed), then send to Pro menu
+    // If already logged in, backfill PRO (if needed), then send to menu
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
       const session = data.session
@@ -89,8 +118,59 @@ export default function HomePage() {
     return () => {
       active = false
       subscription?.unsubscribe()
+      window.removeEventListener('unhandledrejection', handleRejection)
     }
   }, [router])
+
+  const handleActivatePro = async () => {
+    if (activating) return
+    setActivating(true)
+    setActivateMessage('Checking your subscription…')
+
+    try {
+      // Get current session for the access token
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData?.session?.access_token
+
+      if (!accessToken) {
+        setActivateMessage('❌ Could not verify your session. Please sign out and sign in again.')
+        setActivating(false)
+        return
+      }
+
+      // Run the backfill
+      await fetch('/api/vimeo-ott/backfill-pro', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      }).catch(() => {})
+
+      // Now check profiles.is_pro directly — this is the source of truth
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('is_pro')
+        .eq('id', sessionData.session.user.id)
+        .single()
+
+      if (profile?.is_pro === true) {
+        setActivateMessage('✅ Pro access confirmed! Redirecting…')
+        setTimeout(() => router.push('/challenges/menu'), 1000)
+      } else {
+        setActivateMessage(
+          "We couldn't find an active subscription linked to your email. If you've just subscribed, wait a minute or two and try again. If the problem persists, contact us at info@accesslonghair.com"
+        )
+        setActivating(false)
+      }
+    } catch {
+      setActivateMessage(
+        "Something went wrong. Please try again in a moment. If the problem persists, contact us at info@accesslonghair.com"
+      )
+      setActivating(false)
+    }
+  }
 
   const handleCopyLink = async () => {
     const url = typeof window !== 'undefined' ? window.location.href : ''
@@ -101,7 +181,6 @@ export default function HomePage() {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // Fallback: prompt copy
       try {
         window.prompt('Copy this link:', url)
       } catch {}
@@ -119,22 +198,19 @@ export default function HomePage() {
     }
 
     setSubmitting(true)
-    setMessage('Preparing your magic link...')
+    setMessage('Preparing your magic link…')
 
     try {
-      // Store Pro intent as a fallback for callback routing
       try {
         localStorage.setItem('pc_next', '/challenges/menu')
       } catch {}
 
-      // Clear any stale session before sending a fresh link
       await supabase.auth.signOut().catch(() => {})
 
       const baseOrigin =
         (process.env.NEXT_PUBLIC_SITE_URL || '').trim() ||
         (typeof window !== 'undefined' ? window.location.origin : '')
 
-      // Make Pro routing explicit in the callback URL
       const callbackUrl = new URL('/auth/callback', baseOrigin)
       callbackUrl.searchParams.set('next', '/challenges/menu')
       callbackUrl.searchParams.set('flow', 'pro')
@@ -195,7 +271,6 @@ export default function HomePage() {
             <br />
             {getOpenInBrowserInstructions()}
           </div>
-
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
@@ -286,12 +361,12 @@ export default function HomePage() {
       </h1>
 
       <p style={{ maxWidth: 520, marginBottom: '1.5rem', color: '#ccc', fontSize: '1rem', lineHeight: 1.45 }}>
-        If you’re an Access Long Hair subscriber, sign in using the same email you used for your subscription.
+        If you're an Access Long Hair subscriber, sign in using the same email you used for your subscription.
         <br />
         If not, you can still sign in to explore the Style Challenge.
         <br />
         <br />
-        We’ll send you a secure, single-use magic link.
+        We'll send you a secure, single-use magic link.
       </p>
 
       {!user ? (
@@ -347,9 +422,64 @@ export default function HomePage() {
           </button>
         </form>
       ) : (
-        <p style={{ color: '#0f0', marginTop: '1rem', marginBottom: '1.5rem' }}>
-          ✅ You are already logged in
-        </p>
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 320,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 12,
+            marginTop: '1rem',
+          }}
+        >
+          <p style={{ color: '#0f0', margin: 0 }}>✅ You are signed in</p>
+
+          {/* Pro activation button — shown while Pro redirect is pending */}
+          <div
+            style={{
+              width: '100%',
+              marginTop: '0.5rem',
+              padding: '1rem',
+              border: '1px solid #444',
+              borderRadius: 8,
+              background: '#111',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <p style={{ color: '#ccc', fontSize: '0.9rem', margin: 0, lineHeight: 1.4 }}>
+              Access Long Hair subscriber but not seeing Pro access?
+            </p>
+            <button
+              type="button"
+              onClick={handleActivatePro}
+              disabled={activating}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                backgroundColor: activating ? '#6c757d' : '#b8860b',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                fontSize: '1rem',
+                cursor: activating ? 'not-allowed' : 'pointer',
+                fontWeight: 600,
+                transition: 'opacity 0.2s',
+                opacity: activating ? 0.9 : 1,
+              }}
+            >
+              {activating ? 'Checking…' : 'Activate Pro Access'}
+            </button>
+            {activateMessage && (
+              <p style={{ fontSize: '0.9rem', color: '#ccc', margin: 0, lineHeight: 1.5 }}>
+                {activateMessage}
+              </p>
+            )}
+          </div>
+        </div>
       )}
 
       {message && (
