@@ -42,11 +42,6 @@ export default function LoadingOverlay({ message = "Working on it…" }) {
       }}>
         This can take a moment on slower connections.
       </p>
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
 }

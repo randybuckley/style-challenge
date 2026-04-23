@@ -41,3 +41,6 @@ a {
 html {
   color-scheme: normal !important;
 }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
