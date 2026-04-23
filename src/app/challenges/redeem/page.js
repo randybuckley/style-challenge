@@ -174,7 +174,7 @@ export default function RedeemPage() {
                 Access Long Hair subscriber
               </h2>
               <p style={{ fontSize: '0.95rem', color: '#9ca3af', lineHeight: 1.6, marginBottom: 14 }}>
-                Pro access is included with your Access Long Hair subscription. Use the same email address you subscribed with.
+                Pro access is included with your Access Long Hair subscription. Log into Style Challenge with the same email address you subscribed with.
               </p>
               <button
                 type="button"

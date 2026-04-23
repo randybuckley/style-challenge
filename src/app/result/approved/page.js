@@ -3,6 +3,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, Suspense } from 'react'
+import LoadingOverlay from '../../../components/LoadingOverlay'
 
 function ApprovedResultInner() {
   const searchParams = useSearchParams()
@@ -342,6 +343,7 @@ function ApprovedResultInner() {
 
   return (
     <main style={pageShell}>
+      {(busy || emailBusy) && <LoadingOverlay message={emailBusy ? "Emailing your certificate…" : "Preparing your certificate PDF…"} />} 
       {/* Logo header */}
       <div style={headerLogoWrap}>
         <img src="/logo.jpeg" alt="Patrick Cameron — Style Challenge" style={logoStyle} />
