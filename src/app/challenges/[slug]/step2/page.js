@@ -7,6 +7,7 @@ import Cropper from 'react-easy-crop'
 import { supabase } from '../../../../lib/supabaseClient'
 import { makeUploadPath } from '../../../../lib/uploadPath'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
+import LoadingOverlay from '../../../../components/LoadingOverlay'
 
 // -------------------- Crop + image helpers --------------------
 function createImage(url) {
@@ -590,6 +591,7 @@ function ChallengeStep2Page() {
         minHeight: '100vh',
       }}
     >
+      {uploading && <LoadingOverlay message="Uploading your photo…" />}
       {/* ✅ Crop modal */}
       {isCropOpen && (
         <div
