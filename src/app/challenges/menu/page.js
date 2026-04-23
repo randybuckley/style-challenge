@@ -18,14 +18,11 @@ export default function ChallengesMenuPage() {
 
   const [isPro, setIsPro] = useState(false);
 
-  // keyed by slug: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
-  // keyed by slug: 'not-submitted' | 'in-review' | 'approved' | 'rejected'
   const [certificateStatus, setCertificateStatus] = useState({});
 
   const [isNarrow, setIsNarrow] = useState(false);
 
-  // Collections from DB (public.collections)
   const [collections, setCollections] = useState([]);
 
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -46,7 +43,6 @@ export default function ChallengesMenuPage() {
 
   const getCertificateStateFromRows = (rows) => {
     if (!rows || rows.length === 0) return 'not-submitted';
-
     const statuses = rows.map((r) => normalizeStatus(r.status));
     if (statuses.includes('approved')) return 'approved';
     if (statuses.includes('rejected')) return 'rejected';
@@ -78,7 +74,6 @@ export default function ChallengesMenuPage() {
       setError(null);
 
       try {
-        // Session
         const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) throw sessionErr;
 
@@ -90,20 +85,16 @@ export default function ChallengesMenuPage() {
         if (cancelled) return;
         setUser(sessionUser);
 
-        // Pro entitlement (IMPORTANT: must be active)
         const { data: entitlements, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
-          .eq('is_active', true) // ✅ ONLY CHANGE: do not treat inactive rows as PRO
+          .eq('is_active', true)
           .limit(1);
 
         if (!cancelled) setIsPro(!entErr && !!entitlements?.length);
 
-        // ------------------------------------------------------------
-        // Load collections for menu cards (DB-driven; no redeploy needed)
-        // ------------------------------------------------------------
         const { data: dbCollections, error: colErr } = await supabase
           .from('collections')
           .select(
@@ -122,13 +113,6 @@ export default function ChallengesMenuPage() {
 
         if (!cancelled) setCollectionsLoading(false);
 
-        // ------------------------------------------------------------
-        // Progress + certificate only needed for:
-        // - starter-style challenge card
-        // - essentials badge (computed from essentials challenges)
-        //
-        // IMPORTANT: Use collection_slug (schema truth), not slug prefixes.
-        // ------------------------------------------------------------
         const { data: challenges, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, steps, sort_order, collection_slug')
@@ -144,14 +128,11 @@ export default function ChallengesMenuPage() {
         (challenges || []).forEach((c) => {
           if (!c?.id || !c?.slug) return;
           challengeIdToSlug[c.id] = c.slug;
-
           const required = Array.isArray(c.steps) ? c.steps.length : 4;
           requiredStepsBySlug[c.slug] = required;
-
           if (c.collection_slug === 'essentials') essentialsSlugsLocal.push(c.slug);
         });
 
-        // Uploads (portfolio)
         const { data: uploads, error: upErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
@@ -169,7 +150,6 @@ export default function ChallengesMenuPage() {
 
         const portfolioBySlug = {};
 
-        // Starter status
         const starterSlug = 'starter-style';
         const starterCount = stepsBySlug[starterSlug]?.size || 0;
         const starterRequired = requiredStepsBySlug[starterSlug] ?? 4;
@@ -181,7 +161,6 @@ export default function ChallengesMenuPage() {
               ? 'in-progress'
               : 'not-started';
 
-        // Essentials status (for badge)
         essentialsSlugsLocal.forEach((slug) => {
           const count = stepsBySlug[slug]?.size || 0;
           const required = requiredStepsBySlug[slug] ?? 4;
@@ -189,11 +168,6 @@ export default function ChallengesMenuPage() {
             count >= required ? 'complete' : count > 0 ? 'in-progress' : 'not-started';
         });
 
-        // ------------------------------------------------------------
-        // Submissions (certificate)
-        // IMPORTANT: Key by challenge_id where available (source of truth),
-        // fallback to challenge_slug only if needed.
-        // ------------------------------------------------------------
         const { data: submissions, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_id, challenge_slug, status, submitted_at, reviewed_at')
@@ -206,7 +180,6 @@ export default function ChallengesMenuPage() {
           const slugFromId = s?.challenge_id ? challengeIdToSlug[s.challenge_id] : null;
           const slug = slugFromId || s?.challenge_slug;
           if (!slug) return;
-
           if (!rowsBySlug[slug]) rowsBySlug[slug] = [];
           rowsBySlug[slug].push(s);
         });
@@ -239,7 +212,6 @@ export default function ChallengesMenuPage() {
   const starterPortfolioState = portfolioStatus['starter-style'] || 'not-started';
   const starterCertState = certificateStatus['starter-style'] || 'not-submitted';
 
-  // Essentials badge logic (based on challenges in essentials collection)
   const essentialsSlugs = useMemo(
     () => Object.keys(portfolioStatus).filter((s) => s !== 'starter-style'),
     [portfolioStatus]
@@ -252,9 +224,9 @@ export default function ChallengesMenuPage() {
     );
 
   const essentialsAnyStarted =
-    essentialsSlugs.length > 0 && essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');
+    essentialsSlugs.length > 0 &&
+    essentialsSlugs.some((slug) => portfolioStatus[slug] !== 'not-started');
 
-  // If collections table empty or failing, render sensible fallbacks
   const menuCollections = useMemo(() => {
     if (Array.isArray(collections) && collections.length > 0) return collections;
 
@@ -314,6 +286,7 @@ export default function ChallengesMenuPage() {
   return (
     <div style={pageShell}>
       <main style={pageMain(isNarrow)}>
+
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 18 }}>
           <Image
@@ -329,28 +302,33 @@ export default function ChallengesMenuPage() {
         {/* Signed-in strip */}
         <div style={identityRow(isNarrow)}>
           <SignedInAs style={identityPill} />
-          <span style={isPro ? proBadge : lockedBadge}>{isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}</span>
+          {isPro ? (
+            <span style={proBadge}>PRO UNLOCKED</span>
+          ) : (
+            <Link href="/challenges/upgrade" style={upgradeLink}>
+              🔒 Unlock Pro
+            </Link>
+          )}
         </div>
 
-        {/* Welcome (first person, Patrick) */}
+        {/* Welcome */}
         <section style={intro}>
-          <h1 style={title}>Welcome</h1>
+          <h1 style={titleStyle}>Welcome</h1>
           <p style={introText}>
-            I’m glad you’re here. This is where you choose your learning pathway.
+            I'm glad you're here. This is where you choose your learning pathway.
             <br />
-            If you’re new, start with <strong>Essentials</strong> first — it’s the core foundation before you move on
+            If you're new, start with <strong>Essentials</strong> first — it's the core foundation before you move on
             to party or bridal work.
           </p>
         </section>
 
-        {/* Starter Challenge (separate card) */}
+        {/* Starter Challenge */}
         <section style={cardSection}>
           <div style={card(isNarrow)}>
             <div style={cardLeft}>
               <img src="/style_one/finished_reference.jpeg" alt="Starter Style Challenge" style={thumb} />
               <div style={{ minWidth: 0 }}>
                 <div style={eyebrowMuted}>Free trial</div>
-
                 <div style={cardTitle}>Starter Style Challenge</div>
                 <p style={cardText}>
                   Try the Style Challenge experience — see how it works, upload your steps, and get your first result.
@@ -406,7 +384,7 @@ export default function ChallengesMenuPage() {
           </div>
         </section>
 
-        {/* Collections (DB-driven) */}
+        {/* Collections */}
         <section style={collectionsSection}>
           <div style={collectionsHeader}>
             <h2 style={collectionsTitle}>Collections</h2>
@@ -426,7 +404,6 @@ export default function ChallengesMenuPage() {
 
               const isEssentials = c.slug === 'essentials';
 
-              // Badge for menu tiles (keep lightweight)
               let badgeText = 'LIVE';
               let badgeStyle = liveBadge;
 
@@ -550,14 +527,20 @@ const proBadge = {
   whiteSpace: 'nowrap',
 };
 
-const lockedBadge = {
-  ...proBadge,
-  borderColor: 'rgba(250,204,21,0.45)',
+const upgradeLink = {
+  fontSize: '0.75rem',
+  fontWeight: 800,
+  padding: '0.35rem 0.6rem',
+  borderRadius: 999,
+  border: '1px solid rgba(250,204,21,0.45)',
   color: '#facc15',
+  whiteSpace: 'nowrap',
+  textDecoration: 'none',
+  cursor: 'pointer',
 };
 
 const intro = { textAlign: 'center', marginBottom: 26 };
-const title = { fontSize: '2rem', marginBottom: 8 };
+const titleStyle = { fontSize: '2rem', marginBottom: 8 };
 const introText = { fontSize: '0.95rem', color: '#cbd5f5', lineHeight: 1.55 };
 
 const cardSection = { marginBottom: 28 };
@@ -707,7 +690,6 @@ const collectionInner = {
 };
 
 const collectionHeaderBlock = { textAlign: 'center', marginBottom: 14 };
-
 const collectionTitle = { fontSize: '1.1rem', margin: '6px 0 6px' };
 const collectionDesc = { fontSize: '0.9rem', color: '#e5e7eb', margin: 0, lineHeight: 1.45 };
 
@@ -743,30 +725,10 @@ const baseBadge = {
   letterSpacing: '0.03em',
 };
 
-const completedBadge = {
-  ...baseBadge,
-  background: '#22c55e',
-  color: '#0b1120',
-};
-
-const progressBadge = {
-  ...baseBadge,
-  background: '#facc15',
-  color: '#0b1120',
-};
-
-const notStartedBadge = {
-  ...baseBadge,
-  background: 'rgba(148,163,184,0.95)',
-  color: '#0b1120',
-};
-
-const comingSoonBadge = {
-  ...baseBadge,
-  background: 'rgba(148,163,184,0.95)',
-  color: '#0b1120',
-};
-
+const completedBadge = { ...baseBadge, background: '#22c55e', color: '#0b1120' };
+const progressBadge = { ...baseBadge, background: '#facc15', color: '#0b1120' };
+const notStartedBadge = { ...baseBadge, background: 'rgba(148,163,184,0.95)', color: '#0b1120' };
+const comingSoonBadge = { ...baseBadge, background: 'rgba(148,163,184,0.95)', color: '#0b1120' };
 const liveBadge = {
   ...baseBadge,
   background: 'rgba(34,197,94,0.25)',
