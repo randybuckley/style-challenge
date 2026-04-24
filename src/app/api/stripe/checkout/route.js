@@ -26,8 +26,8 @@ export async function POST(req) {
         },
       ],
       customer_email: email,
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/challenges/redeem?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/challenges/redeem?cancelled=true`,
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/challenges/upgrade?success=true`,
+cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/challenges/upgrade?cancelled=true`,
       metadata: {
         user_id: userId,
         email: email,
