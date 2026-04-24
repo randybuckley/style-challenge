@@ -304,18 +304,24 @@ export default function ProCertifyPage() {
           </button>
 
           <button
-            onClick={handleSubmit}
-            disabled={busy}
+            onClick={() => {
+              if (demo) {
+                const qs = []
+                if (adminDemo) qs.push('admin_demo=true')
+                qs.push('demo=1')
+                router.push(`/challenges/${encodeURIComponent(slug)}/certificate-checkout?${qs.join('&')}`)
+                return
+              }
+              router.push(`/challenges/${encodeURIComponent(slug)}/certificate-checkout`)
+            }}
             style={{
               ...btn,
               background: '#28a745',
-              opacity: busy ? 0.7 : 1,
-              cursor: busy ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
             }}
-            title={demo ? 'Demo: proceeds to approved result page' : 'Submit for review'}
-          >
-            {busy ? 'Submitting…' : 'Have Patrick Check My Work'}
-          </button>
+        >
+          Have Patrick Check My Work
+        </button>
         </div>
 
         {banner && (
