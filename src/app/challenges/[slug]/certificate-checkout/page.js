@@ -47,7 +47,7 @@ function CertificateCheckoutPage() {
       const qs = []
       if (adminDemo) qs.push('admin_demo=true')
       qs.push('demo=1')
-      router.push(`/challenges/${encodeURIComponent(slug)}/result/approved?${qs.join('&')}`)
+      router.push(`/challenges/${encodeURIComponent(slug)}/result/submitted?${qs.join('&')}`)
       return
     }
 
@@ -123,7 +123,7 @@ function CertificateCheckoutPage() {
       try { data = raw ? JSON.parse(raw) : {} } catch { data = { error: raw } }
 
       if (res.ok) {
-        router.push(`/challenges/${encodeURIComponent(slug)}/result/approved`)
+        router.push(`/challenges/${encodeURIComponent(slug)}/result/submitted`)
       } else {
         setError(data?.error || 'Something went wrong. Please try again.')
         setSubmitting(false)
