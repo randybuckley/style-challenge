@@ -285,7 +285,7 @@ export default function CollectionChallengesPage({
           ) : null}
         </section>
 
-        {/* Non-pro banner */}
+        {/* Non-pro banner — gold, upgrade action */}
         {!isPro && (
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
@@ -293,8 +293,8 @@ export default function CollectionChallengesPage({
                 Some styles in this collection require Pro to launch and submit for certification.
               </div>
               <div style={{ marginTop: 12 }}>
-                <Link href="/challenges/upgrade" style={unlockButton}>
-                  Unlock Pro access
+                <Link href="/challenges/upgrade" style={goldButton}>
+                  🔒 Unlock Pro access
                 </Link>
               </div>
             </div>
@@ -438,15 +438,47 @@ const nonProCard = {
   textAlign: 'center',
 };
 
-const unlockButton = {
+// 🟡 Gold — always upgrade/lock actions
+const goldButton = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   padding: '0.6rem 1.3rem',
   borderRadius: 999,
-  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+  background: 'linear-gradient(135deg, #facc15, #f59e0b)',
   color: '#0b1120',
   fontSize: '0.88rem',
+  fontWeight: 800,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+};
+
+// 🟢 Green — always progress/launch actions
+const launchCta = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0.55rem 1.15rem',
+  borderRadius: 999,
+  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+  color: '#0b1120',
+  fontSize: '0.82rem',
+  fontWeight: 700,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+};
+
+// 🟡 Gold — locked/upgrade per challenge
+const lockedCta = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0.55rem 1.15rem',
+  borderRadius: 999,
+  border: '1px solid rgba(250,204,21,0.45)',
+  backgroundColor: '#020617',
+  color: '#facc15',
+  fontSize: '0.82rem',
   fontWeight: 800,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
@@ -523,35 +555,6 @@ const statusPillRejected = {
   background: 'rgba(248,113,113,0.14)',
   color: '#f87171',
   borderColor: 'rgba(248,113,113,0.35)',
-};
-
-const launchCta = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '0.55rem 1.15rem',
-  borderRadius: 999,
-  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-  color: '#0b1120',
-  fontSize: '0.82rem',
-  fontWeight: 700,
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-};
-
-const lockedCta = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '0.55rem 1.15rem',
-  borderRadius: 999,
-  border: '1px solid rgba(250,204,21,0.45)',
-  backgroundColor: '#020617',
-  color: '#facc15',
-  fontSize: '0.82rem',
-  fontWeight: 800,
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
 };
 
 const backButton = {
