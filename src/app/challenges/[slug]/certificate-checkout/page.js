@@ -3,8 +3,8 @@
 import { useEffect, useState, Suspense } from 'react'
 import Image from 'next/image'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
-import { supabase } from '../../../../../lib/supabaseClient'
-import SignedInAs from '../../../../../components/SignedInAs'
+import { supabase } from '../../../../lib/supabaseClient'
+import SignedInAs from '../../../../components/SignedInAs'
 
 function CertificateCheckoutPage() {
   const router = useRouter()
