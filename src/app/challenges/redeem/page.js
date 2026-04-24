@@ -22,7 +22,7 @@ export default function RedeemPage() {
         if (sessionErr) console.warn('[redeem] session error:', sessionErr.message)
         const sessionUser = sessionData?.session?.user || null
         if (!sessionUser) {
-          router.replace(`/welcome-back?next=${encodeURIComponent('/challenges/redeem')}`)
+          router.replace(`/welcome-back?next=${encodeURIComponent('/challenges/upgrade')}`)
           return
         }
         if (cancelled) return
