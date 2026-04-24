@@ -23,12 +23,9 @@ export default function CollectionChallengesPage({
 
   const [isPro, setIsPro] = useState(false);
 
-  // Loaded from DB
-  const [collectionChallenges, setCollectionChallenges] = useState([]); // [{ id, slug, steps, sort_order, thumbnail_url, tier, is_pro_only }]
+  const [collectionChallenges, setCollectionChallenges] = useState([]);
 
-  // portfolio: 'not-started' | 'in-progress' | 'complete'
   const [portfolioStatus, setPortfolioStatus] = useState({});
-  // certificate: 'not-submitted' | 'in-review' | 'approved' | 'rejected'
   const [certificateStatus, setCertificateStatus] = useState({});
 
   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -37,7 +34,6 @@ export default function CollectionChallengesPage({
 
   const getCertificateStateFromRows = (rows) => {
     if (!rows || rows.length === 0) return 'not-submitted';
-
     const statuses = rows.map((r) => normalizeStatus(r.status));
     if (statuses.includes('approved')) return 'approved';
     if (statuses.includes('rejected')) return 'rejected';
@@ -61,16 +57,11 @@ export default function CollectionChallengesPage({
     const u = (url || '').toString().trim();
     if (!u) return '';
     if (u.startsWith('http://') || u.startsWith('https://')) return u;
-
-    // Supabase public storage URLs stored as "/storage/v1/object/public/..."
     if (u.startsWith('/storage/')) {
       if (!SUPABASE_URL) return u;
       return `${SUPABASE_URL}${u}`;
     }
-
-    // Next.js public/ paths
     if (u.startsWith('/')) return u;
-
     return u;
   };
 
@@ -96,7 +87,6 @@ export default function CollectionChallengesPage({
       setError(null);
 
       try {
-        // 1) Session
         const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) throw sessionErr;
 
@@ -109,19 +99,16 @@ export default function CollectionChallengesPage({
         if (cancelled) return;
         setUser(sessionUser);
 
-        // 2) Entitlement (Pro) — IMPORTANT: must be active
         const { data: entRows, error: entErr } = await supabase
           .from('user_entitlements')
           .select('tier')
           .eq('user_id', sessionUser.id)
           .eq('tier', 'pro')
-          .eq('is_active', true) // ✅ do not treat inactive rows as PRO
+          .eq('is_active', true)
           .limit(1);
 
         if (!cancelled) setIsPro(!entErr && !!entRows?.length);
 
-        // 3) Load challenges for THIS collection (DB-driven)
-        // Uses public.challenges.collection_slug
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
           .select('id, slug, steps, sort_order, thumbnail_url, collection_slug, tier, is_pro_only')
@@ -133,7 +120,6 @@ export default function CollectionChallengesPage({
         const items = (chRows || []).filter((c) => c?.id && c?.slug);
         if (!cancelled) setCollectionChallenges(items);
 
-        // Build id->slug and required steps maps for portfolio computation
         const idToSlug = new Map();
         const requiredBySlug = {};
         items.forEach((c) => {
@@ -141,7 +127,6 @@ export default function CollectionChallengesPage({
           requiredBySlug[c.slug] = Array.isArray(c.steps) ? c.steps.length : 4;
         });
 
-        // 4) Portfolio status from uploads
         const { data: uploadRows, error: uploadErr } = await supabase
           .from('uploads')
           .select('challenge_id, step_number')
@@ -152,7 +137,7 @@ export default function CollectionChallengesPage({
         const stepsBySlug = new Map();
         for (const row of uploadRows || []) {
           const slug = idToSlug.get(row.challenge_id);
-          if (!slug) continue; // ignore uploads from other collections
+          if (!slug) continue;
           if (!stepsBySlug.has(slug)) stepsBySlug.set(slug, new Set());
           stepsBySlug.get(slug).add(row.step_number);
         }
@@ -168,8 +153,6 @@ export default function CollectionChallengesPage({
 
         if (!cancelled) setPortfolioStatus(portfolioBySlug);
 
-        // 5) Certificate status from submissions
-        // Key by challenge_id first; fall back to challenge_slug if needed
         const { data: submissionRows, error: subErr } = await supabase
           .from('submissions')
           .select('challenge_id, challenge_slug, status, submitted_at, reviewed_at')
@@ -265,6 +248,7 @@ export default function CollectionChallengesPage({
   return (
     <div style={pageShell}>
       <main style={pageMain}>
+
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '1.1rem' }}>
           <Image
@@ -277,13 +261,17 @@ export default function CollectionChallengesPage({
           />
         </div>
 
-        {/* Signed-in identity strip + tier indicator */}
+        {/* Identity strip */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
           <div style={identityRow}>
             <SignedInAs style={identityPill} />
-            <span style={isPro ? proBadge : lockedBadge}>
-              {isPro ? 'PRO UNLOCKED' : 'NOT UNLOCKED'}
-            </span>
+            {isPro ? (
+              <span style={proBadge}>PRO UNLOCKED</span>
+            ) : (
+              <Link href="/challenges/upgrade" style={upgradeLink}>
+                🔒 Unlock Pro
+              </Link>
+            )}
           </div>
         </div>
 
@@ -297,16 +285,15 @@ export default function CollectionChallengesPage({
           ) : null}
         </section>
 
+        {/* Non-pro banner */}
         {!isPro && (
           <section style={{ maxWidth: 820, margin: '0 auto 1.1rem auto' }}>
             <div style={nonProCard}>
               <div style={{ color: '#e5e7eb', fontSize: '0.92rem' }}>
                 Some styles in this collection require Pro to launch and submit for certification.
-                <br />
-                If you already have Pro access, go to the unlock page and use “Refresh access”.
               </div>
               <div style={{ marginTop: 12 }}>
-                <Link href="/challenges/redeem" style={redeemButton}>
+                <Link href="/challenges/upgrade" style={unlockButton}>
                   Unlock Pro access
                 </Link>
               </div>
@@ -320,7 +307,6 @@ export default function CollectionChallengesPage({
             {styles.map((s) => {
               const p = portfolioPill(s.slug);
               const c = certificatePill(s.slug);
-
               const launchBlocked = s.isProOnly && !isPro;
 
               return (
@@ -349,8 +335,8 @@ export default function CollectionChallengesPage({
 
                     <div style={{ marginTop: 10 }}>
                       {launchBlocked ? (
-                        <Link href="/challenges/redeem" style={lockedCta}>
-                          Locked — unlock Pro
+                        <Link href="/challenges/upgrade" style={lockedCta}>
+                          🔒 Unlock Pro to launch
                         </Link>
                       ) : (
                         <Link href={s.launchHref} style={launchCta}>
@@ -432,32 +418,37 @@ const proBadge = {
   whiteSpace: 'nowrap',
 };
 
-const lockedBadge = {
-  ...proBadge,
-  borderColor: 'rgba(250,204,21,0.45)',
+const upgradeLink = {
+  fontSize: '0.75rem',
+  fontWeight: 800,
+  padding: '0.35rem 0.6rem',
+  borderRadius: 999,
+  border: '1px solid rgba(250,204,21,0.45)',
   color: '#facc15',
+  whiteSpace: 'nowrap',
+  textDecoration: 'none',
+  cursor: 'pointer',
 };
 
 const nonProCard = {
   borderRadius: 16,
-  background: 'radial-gradient(circle at top, #020617 0, #020617 55%, #020617 100%)',
+  background: '#020617',
   border: '1px solid rgba(250,204,21,0.35)',
   padding: '0.95rem 1.05rem',
   textAlign: 'center',
 };
 
-const redeemButton = {
+const unlockButton = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   padding: '0.6rem 1.3rem',
   borderRadius: 999,
-  background: 'linear-gradient(135deg, #facc15, #f59e0b, #facc15)',
+  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
   color: '#0b1120',
   fontSize: '0.88rem',
   fontWeight: 800,
   textDecoration: 'none',
-  boxShadow: '0 12px 30px rgba(250,204,21,0.25)',
   whiteSpace: 'nowrap',
 };
 
@@ -540,12 +531,11 @@ const launchCta = {
   justifyContent: 'center',
   padding: '0.55rem 1.15rem',
   borderRadius: 999,
-  background: 'linear-gradient(135deg, #22c55e, #16a34a, #22c55e)',
+  background: 'linear-gradient(135deg, #22c55e, #16a34a)',
   color: '#0b1120',
   fontSize: '0.82rem',
   fontWeight: 700,
   textDecoration: 'none',
-  boxShadow: '0 10px 24px rgba(34,197,94,0.35)',
   whiteSpace: 'nowrap',
 };
 
