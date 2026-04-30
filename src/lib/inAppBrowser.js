@@ -4,26 +4,29 @@ export function isInAppBrowser(userAgent = '') {
   const ua = (userAgent || '').toLowerCase()
 
   // Common in-app / webview identifiers (Facebook, Instagram, LinkedIn, etc.)
-  const inAppHints = [
-    'fban', // Facebook app
-    'fbav', // Facebook app
-    'instagram',
-    'messenger',
-    'line',
-    'linkedinapp',
-    'snapchat',
-    'twitter',
-    'tiktok',
-    'pinterest',
-    'wechat',
-    'micromessenger',
-    'whatsapp',
-    'yahoo', // Yahoo app browser often includes "Yahoo"
-    'yjapp', // Yahoo Japan
-    'duckduckgo',
-    'gsa', // Google Search App
-    'wv', // Android WebView
-  ]
+const inAppHints = [
+  'fban',
+  'fbav',
+  'fbios',      // Facebook iOS variant
+  'fb_iab',     // Facebook in-app browser variant
+  'instagram',
+  'messenger',
+  'line',
+  'linkedinapp',
+  'snapchat',
+  'twitter',
+  'tiktok',
+  'musical_ly', // older TikTok
+  'pinterest',
+  'wechat',
+  'micromessenger',
+  'whatsapp',
+  'yahoo',
+  'yjapp',
+  'duckduckgo',
+  'gsa',
+  'wv',
+]
 
   return inAppHints.some((hint) => ua.includes(hint))
 }
