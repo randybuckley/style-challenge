@@ -59,7 +59,7 @@ export default function EssentialsCollectionPage() {
     return (essentialsChallenges || []).map((c, idx) => ({
       number: idx + 1,
       slug: c.slug,
-      title: prettifySlug(c.slug),
+      title: c.title || prettifySlug(c.slug),
       isLive: true,
       thumbSrc: resolveAssetUrl(c.thumbnail_url),
       launchHref: `/challenges/${c.slug}/step1`,
