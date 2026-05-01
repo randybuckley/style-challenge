@@ -100,7 +100,7 @@ export default function EssentialsCollectionPage() {
 
         const { data: chRows, error: chErr } = await supabase
           .from('challenges')
-          .select('id, slug, steps, sort_order, thumbnail_url')
+          .select('id, slug, title, steps, sort_order, thumbnail_url')
           .like('slug', 'essentials-%')
           .order('sort_order', { ascending: true });
 
