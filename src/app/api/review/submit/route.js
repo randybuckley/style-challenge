@@ -55,7 +55,7 @@ export async function POST(req) {
       challenge_slug: bodyChallengeSlugSnake,
       challengeSlug: bodyChallengeSlugCamel,
 
-      // optional images passed from client – we’ll merge with DB-derived ones
+      // optional images passed from client – we'll merge with DB-derived ones
       images: bodyImages = {},
     } = body || {}
 
@@ -104,23 +104,32 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
-    // NEW: Ensure we persist challenge_slug for Essentials status mapping.
-    // If not provided by the client, look it up from `challenges` by id.
+    // Always fetch challenge data — needed for email title and exemplar images
     // ------------------------------------------------------------------
     let resolvedChallengeSlug = challengeSlug
+    let challengeTitle = ''
+    let exemplarImages = {}
 
-    if (!resolvedChallengeSlug) {
-      const { data: chRow, error: chLookupErr } = await supabaseAdmin
-        .from('challenges')
-        .select('slug')
-        .eq('id', challengeId)
-        .maybeSingle()
+    const { data: chRow, error: chLookupErr } = await supabaseAdmin
+      .from('challenges')
+      .select('slug, title, steps, thumbnail_url')
+      .eq('id', challengeId)
+      .maybeSingle()
 
-      if (chLookupErr) {
-        console.error('/api/review/submit: challenges lookup error', chLookupErr)
-      }
+    if (chLookupErr) {
+      console.error('/api/review/submit: challenges lookup error', chLookupErr)
+    }
 
-      resolvedChallengeSlug = chRow?.slug || null
+    if (!resolvedChallengeSlug) resolvedChallengeSlug = chRow?.slug || null
+    challengeTitle = chRow?.title || resolvedChallengeSlug || 'Style Challenge'
+
+    // Extract exemplar images from steps JSONB
+    // Structure: [{ stepNumber, referenceImageUrl, videoUrl }, ...]
+    const challengeSteps = Array.isArray(chRow?.steps) ? chRow.steps : []
+    for (const step of challengeSteps) {
+      const num = step.stepNumber ?? step.step_number ?? null
+      const img = step.referenceImageUrl ?? step.reference_image_url ?? null
+      if (num && img) exemplarImages[num] = img
     }
 
     // ------------------------------------------------------------------
@@ -192,7 +201,7 @@ export async function POST(req) {
       )
     }
 
-    // --- Prepare Patrick's email with Approve / Reject links + thumbs ---
+    // --- Prepare Patrick's email ---
     let mailer = 'skipped'
 
     if (SENDGRID_API_KEY) {
@@ -206,132 +215,155 @@ export async function POST(req) {
         const rejectUrl = `${site}/api/review/reject-quick?token=${encodeURIComponent(reviewToken)}`
         const logoUrl = `${site}/logo.jpeg`
 
-        // Build thumbnail cells from mergedImages
-        const thumbCells = [1, 2, 3, 4]
-          .map((step) => {
-            const raw = mergedImages?.[step]
-            const label = step === 4 ? 'Finished Look' : `Step ${step}`
+        // Helper: resolve a relative Supabase path to an absolute URL
+        const resolveImgUrl = (raw) => {
+          if (!raw) return null
+          const s = String(raw)
+          if (/^https?:\/\//i.test(s)) return s
+          if (SUPABASE_URL) return `${SUPABASE_URL.replace(/\/+$/, '')}${s.startsWith('/') ? s : '/' + s}`
+          return s
+        }
 
-            if (!raw) {
-              return `
-                <td align="center" style="padding:4px 6px;font-size:12px;color:#777;">
-                  <div style="margin-bottom:4px;font-weight:600;">${label}</div>
-                  <div style="
-                    width:96px;
-                    height:96px;
-                    border-radius:10px;
-                    border:1px dashed #d1d5db;
-                    background:#f9fafb;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    color:#9ca3af;
-                    font-size:11px;
-                  ">
-                    No image
-                  </div>
-                </td>
-              `
-            }
+        const stepLabels = { 1: 'Step 1', 2: 'Step 2', 3: 'Step 3', 4: 'Finished Look' }
 
-            let src = String(raw)
-            if (!/^https?:\/\//i.test(src) && SUPABASE_URL) {
-              const baseSupabase = SUPABASE_URL.replace(/\/+$/, '')
-              src = `${baseSupabase}/storage/v1/object/public/uploads/${src}`
-            }
+        const stepRows = [1, 2, 3, 4].map((n) => {
+          const exemplarSrc = resolveImgUrl(exemplarImages[n])
 
+          const rawSubmitted = mergedImages?.[n]
+          let submittedSrc = null
+          if (rawSubmitted) {
+            const s = String(rawSubmitted)
+            submittedSrc = /^https?:\/\//i.test(s)
+              ? s
+              : SUPABASE_URL
+                ? `${SUPABASE_URL.replace(/\/+$/, '')}/storage/v1/object/public/uploads/${s}`
+                : s
+          }
+
+          if (!submittedSrc && !exemplarSrc) return ''
+          const label = stepLabels[n]
+
+          if (exemplarSrc && submittedSrc) {
             return `
-              <td align="center" style="padding:4px 6px;font-size:12px;color:#555;">
-                <div style="margin-bottom:4px;font-weight:600;">${label}</div>
-                <img
-                  src="${src}"
-                  alt="${label}"
-                  width="96"
-                  style="
-                    display:block;
-                    width:96px;
-                    height:96px;
-                    object-fit:cover;
-                    border-radius:10px;
-                    border:1px solid #e5e7eb;
-                  "
-                />
+              <tr>
+                <td style="padding:24px 22px 0;">
+                  <p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#111;">${label}</p>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                      <td width="49%" valign="top" align="center">
+                        <p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#999;">Patrick's Example</p>
+                        <img src="${exemplarSrc}" width="240" alt="Example — ${label}"
+                          style="display:block;width:100%;max-width:240px;height:auto;border-radius:8px;border:1px solid #e5e7eb;" />
+                      </td>
+                      <td width="2%"></td>
+                      <td width="49%" valign="top" align="center">
+                        <p style="margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#999;">Submitted</p>
+                        <img src="${submittedSrc}" width="240" alt="${label}"
+                          style="display:block;width:100%;max-width:240px;height:auto;border-radius:8px;border:1px solid #e5e7eb;" />
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>`
+          }
+
+          return `
+            <tr>
+              <td style="padding:24px 22px 0;">
+                <p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#111;">${label}</p>
+                <img src="${submittedSrc}" width="512" alt="${label}"
+                  style="display:block;width:100%;max-width:512px;height:auto;border-radius:8px;border:1px solid #e5e7eb;" />
               </td>
-            `
-          })
-          .join('')
+            </tr>`
+        }).join('')
 
         const html = `
-          <div style="background:#f7f7f8;padding:24px 0;">
+          <div style="background:#f4f4f6;padding:24px 0;">
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
                    style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111;">
               <tr>
                 <td align="center">
                   <table role="presentation" width="600" cellspacing="0" cellpadding="0"
-                         style="background:#ffffff;border:1px solid #eee;border-radius:12px;overflow:hidden">
-                    <tr>
-                      <td align="center" style="padding:22px 22px 10px">
-                        <img src="${logoUrl}" width="160" height="auto"
-                             alt="Patrick Cameron – Style Challenge"
-                             style="display:block;border:0;outline:none;text-decoration:none" />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:4px 22px 10px">
-                        <h2 style="margin:0 0 8px;font-size:20px;line-height:1.35">
-                          New Style Challenge submission
-                        </h2>
-                        <p style="margin:0 0 4px;font-size:15px;line-height:1.6">
-                          Stylist: <strong>${safe(stylist)}</strong>
-                        </p>
-                        ${
-                          salonName
-                            ? `<p style="margin:0 0 4px;font-size:14px;line-height:1.6">
-                                 Salon: ${safe(salonName)}
-                               </p>`
-                            : ''
-                        }
-                        <p style="margin:0 0 10px;font-size:14px;line-height:1.6">
-                          Email: <a href="mailto:${safe(userEmail)}">${safe(
-          userEmail
-        )}</a>
-                        </p>
-                      </td>
-                    </tr>
+                         style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
 
+                    <!-- Admin toolbar: Approve / Reject + quick reference -->
                     <tr>
-                      <td style="padding:4px 22px 4px;">
+                      <td style="background:#f8f9fa;border-bottom:1px solid #e5e7eb;padding:14px 22px;">
                         <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                           <tr>
-                            ${thumbCells}
+                            <td style="vertical-align:middle;">
+                              <p style="margin:0;font-size:13px;color:#555;line-height:1.5;">
+                                <strong>${safe(challengeTitle)}</strong> &middot; ${safe(stylist)}
+                                ${salonName ? `&middot; ${safe(salonName)}` : ''}
+                                &middot; <a href="mailto:${safe(userEmail)}" style="color:#555;">${safe(userEmail)}</a>
+                              </p>
+                            </td>
+                            <td align="right" style="white-space:nowrap;padding-left:16px;vertical-align:middle;">
+                              <a href="${approveUrl}"
+                                 style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;
+                                        padding:8px 18px;border-radius:6px;font-weight:700;font-size:13px;margin-right:8px;">
+                                ✓ Approve
+                              </a>
+                              <a href="${rejectUrl}"
+                                 style="display:inline-block;background:#dc2626;color:#fff;text-decoration:none;
+                                        padding:8px 18px;border-radius:6px;font-weight:700;font-size:13px;">
+                                ✕ Reject
+                              </a>
+                            </td>
                           </tr>
                         </table>
                       </td>
                     </tr>
 
+                    <!-- Logo -->
                     <tr>
-                      <td style="padding:10px 22px 18px">
-                        <div style="margin:10px 0 0;">
-                          <a href="${approveUrl}"
-                             style="display:inline-block;background:#28a745;color:#fff;
-                                    text-decoration:none;padding:10px 14px;border-radius:8px;
-                                    font-weight:700;margin-right:10px;">
-                            Approve
-                          </a>
-                          <a href="${rejectUrl}"
-                             style="display:inline-block;background:#dc3545;color:#fff;
-                                    text-decoration:none;padding:10px 14px;border-radius:8px;
-                                    font-weight:700;">
-                            Reject
-                          </a>
-                        </div>
+                      <td align="center" style="padding:32px 22px 8px;">
+                        <img src="${logoUrl}" width="160" height="auto"
+                             alt="Patrick Cameron – Style Challenge"
+                             style="display:block;border:0;outline:none;text-decoration:none;" />
                       </td>
                     </tr>
+
+                    <!-- Challenge title -->
                     <tr>
-                      <td style="padding:8px 22px 22px;color:#888;font-size:12px">
-                        © ${new Date().getFullYear()} Patrick Cameron Team
+                      <td align="center" style="padding:4px 22px 0;">
+                        <p style="margin:0;font-size:22px;font-weight:700;letter-spacing:-0.02em;color:#111;">
+                          ${safe(challengeTitle)}
+                        </p>
                       </td>
                     </tr>
+
+                    <!-- Greeting — forwardable body starts here -->
+                    <tr>
+                      <td style="padding:24px 22px 0;">
+                        <p style="margin:0 0 10px;font-size:15px;line-height:1.7;">Dear ${safe(firstName || stylist)},</p>
+                        <p style="margin:0;font-size:15px;line-height:1.7;color:#444;">
+                          Thank you for submitting your <strong>${safe(challengeTitle)}</strong> challenge
+                          work for Patrick Cameron's personal review. Here are the images you submitted:
+                        </p>
+                      </td>
+                    </tr>
+
+                    <!-- Step images (comparison or single) -->
+                    ${stepRows}
+
+                    <!-- Sign-off -->
+                    <tr>
+                      <td style="padding:32px 22px 8px;">
+                        <p style="margin:0;font-size:15px;line-height:1.7;">Kind regards,</p>
+                        <p style="margin:4px 0 0;font-size:15px;font-weight:700;line-height:1.7;">Patrick Cameron</p>
+                      </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                      <td style="padding:16px 22px 24px;border-top:1px solid #f0f0f0;">
+                        <p style="margin:0;font-size:12px;color:#aaa;">
+                          © ${new Date().getFullYear()} Patrick Cameron Team
+                        </p>
+                      </td>
+                    </tr>
+
                   </table>
                 </td>
               </tr>
