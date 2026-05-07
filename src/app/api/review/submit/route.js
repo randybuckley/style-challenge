@@ -203,7 +203,7 @@ export async function POST(req) {
         const approveUrl = `${site}/api/review/decision?action=approve&token=${encodeURIComponent(
           reviewToken
         )}&userEmail=${encodeURIComponent(userEmail)}`
-        const rejectUrl = `${site}/review/${encodeURIComponent(reviewToken)}`
+        const rejectUrl = `${site}/api/review/reject-quick?token=${encodeURIComponent(reviewToken)}`
         const logoUrl = `${site}/logo.jpeg`
 
         // Build thumbnail cells from mergedImages
