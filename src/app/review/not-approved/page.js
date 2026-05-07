@@ -1,7 +1,7 @@
 // src/app/review/not-approved/page.js
 'use client'
 
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 import Image from 'next/image'
 import { useSearchParams } from 'next/navigation'
 
@@ -10,12 +10,17 @@ function NotApprovedContent() {
   const toEmail = params.get('to') || ''
   const firstName = params.get('name') || ''
   const slug = params.get('slug') || ''
+  const [copied, setCopied] = useState(false)
 
   const displayName = firstName || toEmail || 'the stylist'
-  const subject = encodeURIComponent('Your Style Challenge submission')
-  const mailtoHref = toEmail ? `mailto:${toEmail}?subject=${subject}` : null
-
   const retryUrl = slug ? `/challenges/${slug}/step1` : null
+
+  const copyEmail = () => {
+    navigator.clipboard.writeText(toEmail).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   return (
     <div style={shell}>
@@ -33,21 +38,27 @@ function NotApprovedContent() {
 
         <div style={iconRow}>✓</div>
         <h1 style={heading}>Marked as not approved</h1>
-        <p style={body}>
-          The submission has been recorded. Forward your review email to{' '}
-          <strong>{displayName}</strong> with your feedback.
+
+        <p style={bodyText}>
+          Go back to your inbox, find the submission email from{' '}
+          <strong>{displayName}</strong>, and forward it with your feedback.
         </p>
 
-        {mailtoHref && (
-          <a href={mailtoHref} style={primaryBtn}>
-            Open email to {firstName || toEmail} →
-          </a>
+        {toEmail && (
+          <div style={emailRow}>
+            <span style={emailAddress}>{toEmail}</span>
+            <button onClick={copyEmail} style={copyBtn}>
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
         )}
 
         {retryUrl && (
-          <p style={{ marginTop: 16, fontSize: 13, color: '#888' }}>
-            Their retry link:{' '}
-            <a href={retryUrl} style={{ color: '#555' }}>{retryUrl}</a>
+          <p style={{ marginTop: 24, fontSize: 13, color: '#888', lineHeight: 1.6 }}>
+            Their retry link (include in your email if helpful):{' '}
+            <a href={retryUrl} style={{ color: '#555', wordBreak: 'break-all' }}>
+              {typeof window !== 'undefined' ? `${window.location.origin}${retryUrl}` : retryUrl}
+            </a>
           </p>
         )}
       </div>
@@ -104,20 +115,36 @@ const heading = {
   color: '#111',
 }
 
-const body = {
-  margin: '0 0 24px',
+const bodyText = {
+  margin: '0 0 20px',
   fontSize: 15,
   lineHeight: 1.6,
   color: '#444',
 }
 
-const primaryBtn = {
-  display: 'inline-block',
+const emailRow = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 10,
+  background: '#f4f4f6',
+  borderRadius: 8,
+  padding: '10px 16px',
+}
+
+const emailAddress = {
+  fontSize: 14,
+  color: '#111',
+  fontWeight: 600,
+}
+
+const copyBtn = {
   background: '#111',
   color: '#fff',
-  textDecoration: 'none',
-  padding: '12px 24px',
-  borderRadius: 8,
+  border: 'none',
+  borderRadius: 6,
+  padding: '6px 14px',
+  fontSize: 13,
   fontWeight: 700,
-  fontSize: 15,
+  cursor: 'pointer',
 }
