@@ -369,7 +369,7 @@ export default function ChallengesMenuPage() {
                       : starterCertState === 'in-review'
                         ? 'CERTIFICATE: IN REVIEW'
                         : starterCertState === 'rejected'
-                          ? 'CERTIFICATE: REJECTED'
+                          ? 'CERTIFICATE: FURTHER WORK NEEDED'
                           : 'CERTIFICATE: NOT SUBMITTED'}
                   </span>
                 </div>
@@ -662,9 +662,9 @@ const statusPillIdle = {
 
 const statusPillRejected = {
   ...statusPillBase,
-  background: 'rgba(248,113,113,0.14)',
-  color: '#f87171',
-  borderColor: 'rgba(248,113,113,0.35)',
+  background: 'rgba(251,191,36,0.14)',
+  color: '#d97706',
+  borderColor: 'rgba(251,191,36,0.35)',
 };
 
 const collectionsSection = { marginTop: 10 };
