@@ -300,14 +300,16 @@ export async function POST(req) {
                             </td>
                             <td align="right" style="white-space:nowrap;padding-left:16px;vertical-align:middle;">
                               <a href="${approveUrl}"
-                                 style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;
-                                        padding:8px 18px;border-radius:6px;font-weight:700;font-size:13px;margin-right:8px;">
-                                ✓ Approve
+                                 style="display:inline-block;background:#f0fdf4;color:#16a34a;text-decoration:none;
+                                        border:1px solid #bbf7d0;padding:6px 14px;border-radius:6px;
+                                        font-weight:600;font-size:12px;margin-right:6px;">
+                                Approve
                               </a>
                               <a href="${rejectUrl}"
-                                 style="display:inline-block;background:#dc2626;color:#fff;text-decoration:none;
-                                        padding:8px 18px;border-radius:6px;font-weight:700;font-size:13px;">
-                                ✕ Reject
+                                 style="display:inline-block;background:#fafafa;color:#555;text-decoration:none;
+                                        border:1px solid #e5e7eb;padding:6px 14px;border-radius:6px;
+                                        font-weight:600;font-size:12px;">
+                                Further work required
                               </a>
                             </td>
                           </tr>
