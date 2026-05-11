@@ -332,14 +332,14 @@ export default function HomePage() {
       <div
         style={{
           width: '100%',
-          maxWidth: 640,
-          aspectRatio: '16 / 9',
+          maxWidth: 360,
+          aspectRatio: '9 / 16',
           marginBottom: '1.5rem',
           position: 'relative',
         }}
       >
         <iframe
-          src="https://player.vimeo.com/video/1138306428?h=ef9c1092a9&badge=0&autopause=0&player_id=0&app_id=58479"
+          src="https://player.vimeo.com/video/1191042438?badge=0&autopause=0&player_id=0&app_id=58479"
           style={{
             position: 'absolute',
             inset: 0,
