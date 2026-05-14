@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabaseClient';
 import SignedInAs from '../../../components/SignedInAs';
+import Logo from '@/components/Logo'
 
 export default function ChallengesMenuPage() {
   const router = useRouter();
@@ -289,26 +290,7 @@ export default function ChallengesMenuPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 18 }}>
-          <Image
-            src="/logo.jpeg"
-            alt="Patrick Cameron Style Challenge"
-            width={260}
-            height={0}
-            style={{ height: 'auto', maxWidth: '100%' }}
-            priority
-          />
-        </div>
-
-        {/* Signed-in strip */}
-        <div style={identityRow(isNarrow)}>
-          <SignedInAs style={identityPill} />
-          {isPro ? (
-            <span style={proBadge}>PRO UNLOCKED</span>
-          ) : (
-            <Link href="/challenges/upgrade" style={upgradeLink}>
-              🔒 Unlock Pro
-            </Link>
-          )}
+        <Logo width={260} />
         </div>
 
         {/* Welcome */}

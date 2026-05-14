@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 import { isInAppBrowser, getOpenInBrowserInstructions } from '@/lib/inAppBrowser'
+import Logo from '@/components/Logo'
 
 export default function HomePage() {
   const router = useRouter()
@@ -307,26 +308,9 @@ export default function HomePage() {
       )}
 
       {/* Logo */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div
-          style={{
-            display: 'inline-block',
-            padding: 10,
-            border: '2px solid #1d1d1d',
-            background: '#fff',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-          }}
-        >
-          <Image
-            src="/logo.jpeg"
-            alt="Style Challenge Logo"
-            width={220}
-            height={0}
-            style={{ height: 'auto', maxWidth: '100%' }}
-            priority
-          />
-        </div>
-      </div>
+<div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+  <Logo width={220} />
+</div>
 
       {/* Intro video */}
       <div
