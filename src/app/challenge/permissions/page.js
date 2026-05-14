@@ -208,7 +208,7 @@ function PermissionsInner() {
         {/* Logo */}
         <div style={logoBar}>
           <img
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron — Style Challenge"
             style={logo}
           />

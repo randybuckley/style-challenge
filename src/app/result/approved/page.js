@@ -346,7 +346,7 @@ function ApprovedResultInner() {
       {(busy || emailBusy) && <LoadingOverlay message={emailBusy ? "Emailing your certificate…" : "Preparing your certificate PDF…"} />} 
       {/* Logo header */}
       <div style={headerLogoWrap}>
-        <img src="/logo.jpeg" alt="Patrick Cameron — Style Challenge" style={logoStyle} />
+        <img src="/logo.png" alt="Patrick Cameron — Style Challenge" style={logoStyle} />
       </div>
 
       {/* Vimeo: Patrick's congratulations */}

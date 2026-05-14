@@ -252,7 +252,7 @@ export default function ChallengePortfolioPage() {
 
       <div style={introWrap}>
         <div style={{ textAlign: 'center', marginBottom: 10 }}>
-          <Image src="/logo.jpeg" alt="Patrick Cameron Style Challenge" width={260} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
+          <Image src="/logo.png" alt="Patrick Cameron Style Challenge" width={260} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>

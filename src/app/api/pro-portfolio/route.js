@@ -142,7 +142,7 @@ export async function POST(request) {
 
     // Load logo and parchment from public folder
     const [logoBytesRaw, parchmentBytesRaw] = await Promise.all([
-      loadImageBytes('/logo.jpeg', origin),
+      loadImageBytes('/logo.png', origin),
       loadImageBytes('/parchment.jpg', origin),
     ])
 

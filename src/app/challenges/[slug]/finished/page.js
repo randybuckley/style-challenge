@@ -694,7 +694,7 @@ function ChallengeFinishedPage() {
       {/* Logo */}
       <div style={{ marginBottom: '1.25rem' }}>
         <Image
-          src="/logo.jpeg"
+          src="/logo.png"
           alt="Style Challenge Logo"
           width={240}
           height={80}

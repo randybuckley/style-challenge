@@ -110,7 +110,7 @@ export default function SubscriberRedeemPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
-          <Image src="/logo.jpeg" alt="Patrick Cameron Style Challenge" width={220} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
+          <Image src="/logo.png" alt="Patrick Cameron Style Challenge" width={220} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
         </div>
 
         <div style={{ textAlign: 'center', marginBottom: 18 }}>

@@ -192,7 +192,7 @@ function ChallengesLoginInner() {
           }}
         >
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={220}
             height={0}

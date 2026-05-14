@@ -213,7 +213,7 @@ export async function POST(req) {
           reviewToken
         )}&userEmail=${encodeURIComponent(userEmail)}`
         const rejectUrl = `${site}/api/review/reject-quick?token=${encodeURIComponent(reviewToken)}`
-        const logoUrl = `${site}/logo.jpeg`
+        const logoUrl = `${site}/logo.png`
 
         // Helper: resolve a relative Supabase path to an absolute URL
         const resolveImgUrl = (raw) => {

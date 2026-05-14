@@ -34,8 +34,8 @@ export async function POST(req) {
     // Robust origin derivation (works locally + on Vercel)
     const origin = new URL(req.url).origin
 
-    // Public logo URL (served from /public/logo.jpeg)
-    const logoUrl = `${origin}/logo.jpeg`
+    // Public logo URL (served from /public/logo.png)
+    const logoUrl = `${origin}/logo.png`
 
     // Call the SAME PDF generator used by the Approved download flow
     const pdfRes = await fetch(`${origin}/api/generate`, {

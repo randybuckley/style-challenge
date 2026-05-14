@@ -82,7 +82,7 @@ function WelcomeBackInner() {
       <main style={shell}>
         <div style={{ marginBottom: 16 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Style Challenge"
             width={240}
             height={0}
@@ -111,7 +111,7 @@ function WelcomeBackInner() {
     <main style={shell}>
       <div style={{ marginBottom: 16 }}>
         <Image
-          src="/logo.jpeg"
+          src="/logo.png"
           alt="Style Challenge"
           width={240}
           height={0}

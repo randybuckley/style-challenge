@@ -325,7 +325,7 @@ export default function PortfolioPage() {
               >
                 <img
                   ref={logoRef}
-                  src="/logo.jpeg"
+                  src="/logo.png"
                   alt="Patrick Cameron — Style Challenge"
                   data-embed="true"
                   style={{

@@ -16,7 +16,7 @@ function SubmittedPage() {
 
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={220}
             height={0}

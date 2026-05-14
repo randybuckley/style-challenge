@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabaseClient';
 import SignedInAs from '../../../components/SignedInAs';
+import Logo from '../../../components/Logo'
 
 export default function EssentialsCollectionPage() {
   const router = useRouter();
@@ -240,14 +241,7 @@ export default function EssentialsCollectionPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '1.1rem' }}>
-          <Image
-            src="/logo.jpeg"
-            alt="Patrick Cameron Style Challenge"
-            width={260}
-            height={0}
-            style={{ height: 'auto', maxWidth: '100%' }}
-            priority
-          />
+        <Logo width={260} />
         </div>
 
         {/* Identity strip */}

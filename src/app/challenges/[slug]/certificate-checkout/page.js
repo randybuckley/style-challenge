@@ -156,7 +156,7 @@ function CertificateCheckoutPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={220}
             height={0}

@@ -252,7 +252,7 @@ export default function CollectionChallengesPage({
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '1.1rem' }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={260}
             height={0}

@@ -27,7 +27,7 @@ function NotApprovedContent() {
       <div style={card}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={180}
             height={0}

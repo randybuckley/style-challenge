@@ -127,7 +127,7 @@ export async function GET(req) {
           sgMail.setApiKey(SENDGRID_API_KEY)
 
           const site = origin
-          const logoUrl = `${site}/logo.jpeg`
+          const logoUrl = `${site}/logo.png`
 
           // NOTE: now includes userEmail in the URL
           const resultUrl = `${site}/result/approved?token=${encodeURIComponent(

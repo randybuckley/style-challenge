@@ -140,7 +140,7 @@ export default function ProfilePage() {
 
         <div style={{ textAlign: 'center', marginBottom: 12 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={220}
             height={0}

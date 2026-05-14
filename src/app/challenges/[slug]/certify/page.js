@@ -233,7 +233,7 @@ export default function ProCertifyPage() {
     <main style={pageShell}>
       <div style={{ textAlign: 'center', marginTop: 12, marginBottom: 6 }}>
         <img
-          src="/logo.jpeg"
+          src="/logo.png"
           alt="Patrick Cameron — Style Challenge"
           style={{ width: 200, height: 'auto', borderRadius: 14, opacity: 0.9 }}
         />

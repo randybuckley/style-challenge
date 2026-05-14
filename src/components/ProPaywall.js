@@ -40,7 +40,7 @@ export default function ProPaywall({ challengeTitle, challengeThumbnail, userId,
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Image
-            src="/logo.jpeg"
+            src="/logo.png"
             alt="Patrick Cameron Style Challenge"
             width={200}
             height={0}

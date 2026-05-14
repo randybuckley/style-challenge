@@ -12,7 +12,7 @@ export default function Logo({ width = 220, borderRadius = 12 }) {
       overflow: 'hidden',
     }}>
       <Image
-        src="/logo.jpeg"
+        src="/logo.png"
         alt="Patrick Cameron Style Challenge"
         width={width}
         height={0}

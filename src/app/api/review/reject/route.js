@@ -135,7 +135,7 @@ export async function POST(req) {
     sgMail.setApiKey(SENDGRID_API_KEY)
 
     // Email assets
-    const logoUrl = `${site}/logo.jpeg`
+    const logoUrl = `${site}/logo.png`
 
     // Escape user-provided content
     const reasonHtml = reason ? escapeHtml(reason) : ''

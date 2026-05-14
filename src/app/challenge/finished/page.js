@@ -345,7 +345,7 @@ function FinishedLookInner() {
       )}
 
       <div style={{ marginBottom: '1.5rem' }}>
-        <Image src="/logo.jpeg" alt="Style Challenge Logo" width={240} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
+        <Image src="/logo.png" alt="Style Challenge Logo" width={240} height={0} style={{ height: 'auto', maxWidth: '100%' }} priority />
       </div>
 
       <h1 style={{ marginBottom: '0.5rem' }}>Finished Look: Show Off Your Best Work</h1>
