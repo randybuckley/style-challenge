@@ -7,9 +7,10 @@ import { supabase } from '../lib/supabaseClient'
 /**
  * SignedInAs
  * - Shows signed-in email when available.
+ * - Links to /account/profile for profile editing.
  * - Optional "Not you? Sign out" action.
  * - Safe in demo/admin contexts (renders nothing if no user).
- * - No side effects unless user clicks sign out.
+ * - No side effects unless user clicks sign out or my profile.
  */
 export default function SignedInAs({
   style,
@@ -95,6 +96,19 @@ export default function SignedInAs({
   return (
     <div style={pillStyle}>
       <span>Signed in as {email}</span>
+
+      <>
+        <span style={{ opacity: 0.35 }}>•</span>
+        <button
+          type="button"
+          onClick={() => router.push('/account/profile')}
+          style={linkStyle}
+          aria-label="My profile"
+          title="My profile"
+        >
+          My profile
+        </button>
+      </>
 
       {showSignOut && (
         <>
