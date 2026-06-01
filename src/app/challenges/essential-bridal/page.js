@@ -6,7 +6,7 @@ export default function EssentialBridalPage() {
   return (
     <CollectionChallengesPage
       collectionSlug="essential-bridal"
-      title="Essential Bridal"
+      title="Bridal Solutions"
       description="Bridal foundations and signature looks."
     />
   );
