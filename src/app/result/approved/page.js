@@ -2,7 +2,7 @@
 'use client'
 
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import LoadingOverlay from '../../../components/LoadingOverlay'
 
 function ApprovedResultInner() {
@@ -21,6 +21,12 @@ function ApprovedResultInner() {
 
   // Cache certificate metadata so download/email can share it without refetching
   const [metaCache, setMetaCache] = useState(null)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && typeof gtag === 'function') {
+      gtag('event', 'certificate_approved', { event_category: 'Certification' })
+    }
+  }, [])
 
   async function fetchCertificateMeta() {
     if (!token) {

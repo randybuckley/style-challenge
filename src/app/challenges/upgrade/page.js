@@ -24,6 +24,14 @@ function UpgradePage() {
     load();
   }, [router]);
 
+  useEffect(() => {
+    if (searchParams.get('success') === 'true') {
+      if (typeof window !== 'undefined' && typeof gtag === 'function') {
+        gtag('event', 'purchase', { event_category: 'Pro', event_label: 'Style Challenge Pro' });
+      }
+    }
+  }, [searchParams]);
+
   if (loading) {
     return (
       <main style={{ minHeight: '100vh', background: '#000', color: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -432,6 +432,10 @@ function ChallengeFinishedPage() {
 
       setUploadMessage('✅ Upload complete!')
       setShowOptions(true)
+
+      if (typeof window !== 'undefined' && typeof gtag === 'function') {
+        gtag('event', 'finished_upload', { event_category: 'Challenge', event_label: slug })
+      }
     } finally {
       setUploading(false)
     }
