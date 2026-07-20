@@ -244,13 +244,19 @@ export async function POST(req) {
         const rejectUrl = `${site}/api/review/reject-quick?token=${encodeURIComponent(reviewToken)}`
         const logoUrl = `${site}/logo.png`
 
-        // Helper: resolve a relative Supabase path to an absolute URL
+        // Helper: resolve a reference-image path to an absolute URL.
+        // Supabase storage assets live under /storage/...; older challenges
+        // (e.g. starter-style) store app /public paths like /style_one/...
+        // which are served from the site, not Supabase.
         const resolveImgUrl = (raw) => {
           if (!raw) return null
           const s = String(raw)
           if (/^https?:\/\//i.test(s)) return s
-          if (SUPABASE_URL) return `${SUPABASE_URL.replace(/\/+$/, '')}${s.startsWith('/') ? s : '/' + s}`
-          return s
+          const path = s.startsWith('/') ? s : '/' + s
+          if (path.startsWith('/storage/')) {
+            return SUPABASE_URL ? `${SUPABASE_URL.replace(/\/+$/, '')}${path}` : path
+          }
+          return `${site}${path}`
         }
 
         const stepLabels = { 1: 'Step 1', 2: 'Step 2', 3: 'Step 3', 4: 'Finished Look' }
