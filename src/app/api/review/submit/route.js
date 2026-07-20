@@ -55,7 +55,7 @@ export async function POST(req) {
       challenge_slug: bodyChallengeSlugSnake,
       challengeSlug: bodyChallengeSlugCamel,
 
-      // optional images passed from client – we'll merge with DB-derived ones
+      // optional images passed from client – validated against this challenge's uploads
       images: bodyImages = {},
     } = body || {}
 
@@ -133,36 +133,62 @@ export async function POST(req) {
     }
 
     // ------------------------------------------------------------------
-    // Pull latest step 1–4 uploads from DB if client didn't send URLs
+    // Pull step 1–4 uploads for THIS challenge only.
+    //
+    // NOTE: this query MUST stay scoped by challenge_id. Without it the
+    // lookup returns the user's globally-latest uploads and images from a
+    // different challenge get written into this submission.
     // ------------------------------------------------------------------
-    let mergedImages = { ...bodyImages } // preserve any explicit overrides
+    const { data: rows, error: uploadsErr } = await supabaseAdmin
+      .from('uploads')
+      .select('step_number, image_url, created_at')
+      .eq('user_id', userId)
+      .eq('challenge_id', challengeId)
+      .in('step_number', [1, 2, 3, 4])
+      .order('created_at', { ascending: false })
 
-    const missingSteps = [1, 2, 3, 4].filter((step) => mergedImages[step] == null)
+    if (uploadsErr) {
+      console.error('/api/review/submit: uploads lookup error', uploadsErr)
+      return NextResponse.json(
+        { ok: false, error: 'Could not load your uploads for this challenge.' },
+        { status: 500 }
+      )
+    }
 
-    if (missingSteps.length > 0) {
-      const { data: rows, error: uploadsErr } = await supabaseAdmin
-        .from('uploads')
-        .select('step_number, image_url, created_at')
-        .eq('user_id', userId)
-        .in('step_number', [1, 2, 3, 4])
-        .order('created_at', { ascending: false })
-
-      if (uploadsErr) {
-        console.error('/api/review/submit: uploads lookup error', uploadsErr)
-      } else if (rows && rows.length) {
-        const latestByStep = {}
-        for (const row of rows) {
-          if (!latestByStep[row.step_number]) {
-            latestByStep[row.step_number] = row.image_url
-          }
-        }
-
-        for (const step of missingSteps) {
-          if (latestByStep[step]) {
-            mergedImages[step] = latestByStep[step]
-          }
-        }
+    // Latest upload per step, plus the set of URLs that legitimately
+    // belong to this challenge.
+    const latestByStep = {}
+    const validUrls = new Set()
+    for (const row of rows || []) {
+      if (row?.image_url) validUrls.add(row.image_url)
+      if (row?.step_number != null && !latestByStep[row.step_number]) {
+        latestByStep[row.step_number] = row.image_url
       }
+    }
+
+    // Client-supplied URLs are honoured only if they belong to this
+    // challenge; otherwise fall back to the latest upload for the step.
+    const mergedImages = {}
+    for (const step of [1, 2, 3, 4]) {
+      const fromClient = bodyImages?.[step]
+      mergedImages[step] =
+        fromClient && validUrls.has(fromClient)
+          ? fromClient
+          : latestByStep[step] || null
+    }
+
+    // Fail loudly rather than emailing Patrick an incomplete submission.
+    const stillMissing = [1, 2, 3, 4].filter((s) => !mergedImages[s])
+    if (stillMissing.length > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Missing image for step ${stillMissing.join(
+            ', '
+          )}. Please upload all four photos for this challenge before submitting.`,
+        },
+        { status: 400 }
+      )
     }
 
     // ------------------------------------------------------------------
@@ -182,6 +208,9 @@ export async function POST(req) {
 
       // overwrite token on resubmission so newest approval link is valid
       review_token: reviewToken,
+
+      // keep the timestamp honest on resubmission
+      submitted_at: new Date().toISOString(),
 
       step1_url: mergedImages[1] || null,
       step2_url: mergedImages[2] || null,
