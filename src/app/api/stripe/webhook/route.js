@@ -28,21 +28,44 @@ export async function POST(req) {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const { user_id, tier } = session.metadata;
+    const { user_id, tier, email } = session.metadata;
 
     if (!user_id || tier !== 'pro') {
       console.error('Webhook missing required metadata:', session.metadata);
       return NextResponse.json({ error: 'Missing or invalid metadata' }, { status: 400 });
     }
 
-    // Write to user_entitlements (source of truth)
+    const nowIso = new Date().toISOString();
+
+    // 1) Ensure the profile row exists FIRST.
+    // user_entitlements.user_id has a foreign key to profiles.id, so the
+    // entitlement write below fails if there's no profile yet. Upsert also
+    // sets the is_pro fast-path cache in the same call.
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .upsert({
+        id: user_id,
+        email: email || null,
+        is_pro: true,
+        is_pro_since: nowIso,
+        updated_at: nowIso,
+      }, {
+        onConflict: 'id'
+      });
+
+    if (profileError) {
+      console.error('Profile upsert error:', profileError);
+      return NextResponse.json({ error: 'Failed to upsert profile' }, { status: 500 });
+    }
+
+    // 2) Write the entitlement (source of truth). FK now satisfied.
     const { error: entitlementError } = await supabase
       .from('user_entitlements')
       .upsert({
         user_id,
         tier: 'pro',
         is_active: true,
-        granted_at: new Date().toISOString(),
+        granted_at: nowIso,
         granted_by_code: null,
         promo_code_id: null,
       }, {
@@ -52,20 +75,6 @@ export async function POST(req) {
     if (entitlementError) {
       console.error('Entitlement upsert error:', entitlementError);
       return NextResponse.json({ error: 'Failed to set entitlement' }, { status: 500 });
-    }
-
-    // Update profiles.is_pro fast-path cache
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        is_pro: true,
-        is_pro_since: new Date().toISOString(),
-      })
-      .eq('id', user_id);
-
-    if (profileError) {
-      console.error('Profile update error:', profileError);
-      return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
     }
 
     console.log(`Pro access granted via Stripe for user ${user_id}`);
